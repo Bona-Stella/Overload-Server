@@ -61,3 +61,8 @@ out/
 
 ### VS Code ###
 .vscode/
+
+### Private ENV ###
+.env
+.env.*
+!.env.example
