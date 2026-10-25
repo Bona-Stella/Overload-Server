@@ -301,6 +301,25 @@ $env:JAVA_HOME = 'C:\path\to\jdk-25'
 
 현재는 JPA·PostgreSQL 의존성이 비활성화되어 있어 DB 연결 없이 초기 애플리케이션을 실행하는 구성입니다. 포트·HTTPS 설정은 별도로 지정하지 않았으며, 기본 HTTP 포트는 `8080`입니다. `/api/v1` 업무 API는 아직 없습니다.
 
+### Health Check API (구현 완료)
+
+`GET /api/v1/health`는 `200 OK`와 `Content-Type: application/json`으로 다음 응답을 반환합니다.
+
+```json
+{"status":"UP"}
+```
+
+애플리케이션의 HTTP 요청 처리 가능 여부만 확인하며, 데이터베이스 및 외부 서비스의 정상 동작을 보장하지 않습니다. `POST /api/v1/health`는 `405 Method Not Allowed`를 반환합니다.
+
+로컬 서버를 실행한 상태에서 다른 터미널로 확인합니다.
+
+```powershell
+curl.exe -i http://localhost:8080/api/v1/health
+curl.exe -i -X POST http://localhost:8080/api/v1/health
+```
+
+검증 후 서버 실행 터미널에서 `Ctrl+C`로 종료합니다.
+
 ### 테스트 및 빌드
 
 ```powershell
@@ -310,7 +329,7 @@ $env:JAVA_HOME = 'C:\path\to\jdk-25'
 
 오프라인 실행에는 Gradle 배포판과 의존성 캐시가 필요합니다. 캐시가 부족하면 의존성 해석 단계에서 실패할 수 있으므로 컴파일·테스트 실패와 구분합니다. 새 환경에서 캐시를 준비하려면 다운로드가 필요합니다.
 
-현재 테스트는 `contextLoads()` 한 개이며, 업무 로직·API·DB 통합 테스트는 아직 없습니다.
+현재 테스트는 `contextLoads()` 1개와 Health Check MVC 테스트 2개입니다. Health Check 테스트는 GET의 HTTP 200·JSON Content-Type·정확한 응답 구조와 값, POST의 HTTP 405를 검증합니다. 업무 로직·DB 통합 테스트는 아직 없습니다.
 
 ---
 
