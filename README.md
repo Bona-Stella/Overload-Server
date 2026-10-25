@@ -16,8 +16,8 @@
   <img src="https://img.shields.io/badge/Java-25%20LTS-ED8B00?style=flat-square&amp;logo=openjdk&amp;logoColor=white" alt="Java">
   <img src="https://img.shields.io/badge/Spring%20Boot-4.1.2-6DB33F?style=flat-square&amp;logo=springboot&amp;logoColor=white" alt="Spring Boot">
   <img src="https://img.shields.io/badge/Gradle-9.8.2-02303A?style=flat-square&amp;logo=gradle&amp;logoColor=white" alt="Gradle">
-  <img src="https://img.shields.io/badge/PostgreSQL-18.6-4169E1?style=flat-square&amp;logo=postgresql&amp;logoColor=white" alt="PostgreSQL">
-  <img src="https://img.shields.io/badge/Status-Planning-6B7280?style=flat-square" alt="Status">
+  <img src="https://img.shields.io/badge/PostgreSQL-Planned-4169E1?style=flat-square&amp;logo=postgresql&amp;logoColor=white" alt="PostgreSQL Planned">
+  <img src="https://img.shields.io/badge/Status-Initial_Setup-6B7280?style=flat-square" alt="Status">
 </div>
 
 ---
@@ -28,7 +28,7 @@
 
 `overload-server`는 사용자 계정, 운동 종목, 운동 세션, 세트별 기록, 루틴 및 통계 데이터를 관리하고 클라이언트 앱에 REST API를 제공하는 백엔드 프로젝트입니다.
 
-> 🚧 현재 초기 설계 단계입니다. 아래 기능, API 및 프로젝트 구조는 개발 목표이며, 구현 과정에서 변경될 수 있습니다.
+> 🚧 현재 Spring Boot 초기 프로젝트가 구성되어 있습니다. 애플리케이션 진입점, MVC·Validation 의존성, 컨텍스트 로딩 테스트가 있으며, 업무 API·인증·DB 연동은 아직 구현되지 않았습니다. 아래 주요 기능과 API는 개발 목표입니다.
 
 ---
 
@@ -105,10 +105,10 @@ Java 및 Spring Boot 기반의 REST API 서버를 개발합니다.
 | Framework | Spring Boot | 4.1.2 |
 | Framework Core | Spring Framework | 7.x |
 | Build Tool | Gradle | 9.8.2 |
-| ORM | Spring Data JPA / Hibernate | Spring Boot 관리 |
+| ORM | Spring Data JPA / Hibernate | 도입 예정 (의존성 주석 처리) |
 | Security | Spring Security | 도입 예정 |
 | Authentication | JWT | 검토 예정 |
-| Validation | Jakarta Validation | 도입 예정 |
+| Validation | Jakarta Validation | Starter 구성 완료 |
 
 ### Database & Infrastructure
 
@@ -125,8 +125,8 @@ Java 및 Spring Boot 기반의 REST API 서버를 개발합니다.
 |:---|:---|
 | Unit Test | JUnit |
 | Integration Test | Spring Boot Test |
-| Container Test | Testcontainers |
-| API Documentation | OpenAPI / Swagger UI |
+| Container Test | Testcontainers (도입 예정) |
+| API Documentation | OpenAPI / Swagger UI (도입 예정) |
 
 > 라이브러리 버전은 가능한 한 Spring Boot의 의존성 관리 설정(BOM)을 따릅니다. 실제 적용 버전은 호환성 검증 후 확정합니다.
 
@@ -172,35 +172,22 @@ User
 
 ## 📁 프로젝트 구조
 
-기능별 도메인을 중심으로 패키지를 구성할 예정입니다.
+Git 저장소 루트가 Gradle 프로젝트 루트입니다. 현재 구조는 다음과 같습니다.
 
 ```text
 overload-server/
-│
+├── AGENTS.md
+├── docs/
+│   ├── engineering/backend.md
+│   └── reference/bootstrap/backend.gitignore.txt
+├── gradle/wrapper/
 ├── src/
 │   ├── main/
-│   │   ├── java/
-│   │   │   └── com/overload/server/
-│   │   │       ├── OverloadServerApplication.java
-│   │   │       │
-│   │   │       ├── global/
-│   │   │       │   ├── config/
-│   │   │       │   ├── exception/
-│   │   │       │   └── response/
-│   │   │       │
-│   │   │       ├── auth/
-│   │   │       ├── user/
-│   │   │       ├── exercise/
-│   │   │       ├── workout/
-│   │   │       ├── routine/
-│   │   │       └── statistics/
-│   │   │
-│   │   └── resources/
-│   │       └── application.yml
-│   │
-│   └── test/
-│
-├── gradle/
+│   │   ├── java/com/overload/overload_server/OverloadServerApplication.java
+│   │   └── resources/application.yaml
+│   └── test/java/com/overload/overload_server/OverloadServerApplicationTests.java
+├── .gitattributes
+├── .gitignore
 ├── build.gradle
 ├── settings.gradle
 ├── gradlew
@@ -208,7 +195,9 @@ overload-server/
 └── README.md
 ```
 
-### 패키지 역할
+기존 하위 `overload-server/`에는 로컬 캐시·빌드 결과·IDE 설정·`HELP.md`를 보존했습니다. 실행 명령은 하위 폴더가 아닌 저장소 루트에서 사용합니다. 해당 로컬 파일은 별도 정리 대상입니다.
+
+### 향후 도메인 패키지 역할
 
 - `global` : 공통 설정, 예외 처리, 응답 규약
 - `auth` : 사용자 인증 및 인가
@@ -283,11 +272,11 @@ Base URL:
 ### Clone Repository
 
 ```bash
-git clone https://github.com/<username>/overload-server.git
+git clone https://github.com/Bona-Stella/overload-server.git
 cd overload-server
 ```
 
-> `<username>`은 실제 GitHub 사용자명 또는 조직명으로 변경해야 합니다.
+이후 명령은 `build.gradle`과 Gradle Wrapper가 있는 저장소 루트에서 실행합니다.
 
 ### Run Application
 
@@ -303,18 +292,36 @@ cd overload-server
 .\gradlew.bat bootRun
 ```
 
-> 현재 초기 개발 단계입니다. DB 및 애플리케이션 환경 설정을 마친 후 실행할 수 있습니다.
+Windows에서 Java가 PATH에 없다면, 설치된 JDK 25 경로를 현재 PowerShell 프로세스에만 지정한 뒤 실행합니다. 아래 경로는 실제 설치 위치로 바꿉니다. 영구 환경변수를 변경할 필요는 없습니다.
+
+```powershell
+$env:JAVA_HOME = 'C:\path\to\jdk-25'
+.\gradlew.bat --version
+```
+
+현재는 JPA·PostgreSQL 의존성이 비활성화되어 있어 DB 연결 없이 초기 애플리케이션을 실행하는 구성입니다. 포트·HTTPS 설정은 별도로 지정하지 않았으며, 기본 HTTP 포트는 `8080`입니다. `/api/v1` 업무 API는 아직 없습니다.
+
+### 테스트 및 빌드
+
+```powershell
+.\gradlew.bat --offline test
+.\gradlew.bat --offline build
+```
+
+오프라인 실행에는 Gradle 배포판과 의존성 캐시가 필요합니다. 캐시가 부족하면 의존성 해석 단계에서 실패할 수 있으므로 컴파일·테스트 실패와 구분합니다. 새 환경에서 캐시를 준비하려면 다운로드가 필요합니다.
+
+현재 테스트는 `contextLoads()` 한 개이며, 업무 로직·API·DB 통합 테스트는 아직 없습니다.
 
 ---
 
 ## 🗺 개발 로드맵
 
 ### Phase 1. 프로젝트 기반 구축
-- [ ] Spring Boot 프로젝트 생성
-- [ ] Gradle 및 의존성 구성
+- [x] Spring Boot 프로젝트 생성
+- [x] Gradle 및 MVC·Validation 의존성 구성
 - [ ] PostgreSQL 연동
 - [ ] 공통 예외 처리 및 응답 규약 설계
-- [ ] 테스트 환경 구축
+- [x] Spring Boot 컨텍스트 로딩 테스트 구성
 
 ### Phase 2. 운동 기록 MVP
 - [ ] 운동 종목 도메인 구현
