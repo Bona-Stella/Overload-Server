@@ -1,7 +1,8 @@
 # 보안·JDBC 세션 기반 (Task 007-1C-1)
 
 현재 단계는 Spring Security 7.1.2 / Spring Session JDBC 4.1.1 기반이다. Boot 4.1.2 BOM으로
-관리한다. 이메일 OTP 로그인은 [007-1C-2 계약](email-otp.md)으로 추가했으며 Google 검증·민감 작업 재인증 API는 아직 없다. `VerifiedIdentity` 생성은
+관리한다. 이메일 OTP는 [007-1C-2](email-otp.md), Google OIDC는 [007-1C-3A](google-oidc.md)로 추가했다.
+민감 작업 재인증 API는 아직 없다. `VerifiedIdentity` 생성은
 인증 성공이 아니다. 후속 검증 코드가 계정 프로비저닝을 완료한 뒤 검증된 계정 UUID만
 `AuthenticationSessionService.establishAfterVerification`에 전달해야 한다.
 Google/이메일 자동 병합 금지와 기존 seed 정책은 [계정 계약](account-provisioning.md)을 유지한다.
@@ -13,8 +14,11 @@ Google/이메일 자동 병합 금지와 기존 seed 정책은 [계정 계약](a
 | GET /api/v1/health | 기존 200 / 정확히 `{"status":"UP"}` |
 | POST /api/v1/health | 기존 405; 이 정확한 경로·메서드만 CSRF 검사 제외, 상태 변경 없음 |
 | GET /api/v1/auth/csrf | 익명/인증 사용자 모두 200, no-store JSON `{headerName, token}` |
+| GET /api/v1/auth/session | 인증 사용자만 200, no-store JSON `{userId}`; 익명 401 |
 | POST /api/v1/auth/logout | 유효한 CSRF 필요, 세션 무효화 후 204 |
 | POST /api/v1/auth/email-otp/request, /verify | CSRF를 유지한 익명 로그인 경로, 상세는 이메일 OTP 계약 |
+| GET /oauth2/authorization/google, /login/oauth2/code/google | 명시적 활성화 시 OIDC 시작/콜백, 비활성 503; 기존 인증 세션은 409 |
+| GET /auth/google/failure | 고정 실패 리디렉션 도착점, 401 GOOGLE_LOGIN_FAILED |
 | 그 밖의 익명 API | 401 JSON `{"code":"AUTHENTICATION_REQUIRED"}`, HTML 로그인/리다이렉트 없음 |
 | 인증 후 CSRF 누락/오류 | 403 JSON `{"code":"CSRF_INVALID"}` |
 | 인증 후 권한 부족 | 403 JSON `{"code":"ACCESS_DENIED"}` |
@@ -30,6 +34,8 @@ Google/이메일 자동 병합 금지와 기존 seed 정책은 [계정 계약](a
 Spring SecurityContext와 별도로 직렬화 가능한 `SessionMetadata`를 JDBC 세션 속성에 저장한다.
 메타데이터에는 `userId`, `loginStartedAt`, `absoluteExpiresAt`, `reauthenticatedAt`이 있다.
 007-1C-2는 JDBC immediate flush와 저장소 재조회로 OTP 로그인 성공 전에 영속 인증 상태를 확인한다.
+007-1C-3A는 이 경로를 VerifiedSessionLogin으로 공용화하고 저장 메타데이터 전체 일치도 확인한다.
+OAuth 필터의 임시 Google principal은 저장하지 않으며, 검증·프로비저닝·영속 자체 세션 확인 뒤만 성공 리디렉션한다.
 principal에는 같은 사용자 UUID만 두며 요청의 userId나 신원 DTO로 SecurityContext를 만들지 않는다.
 
 - 최초 성공 로그인: 서버 Clock으로 시작 시각과 **90 × 24시간** 뒤 절대 만료를 정한다.
@@ -94,7 +100,8 @@ V1/V2는 그대로 두고 V3에 채택 버전 JAR의 공식 PostgreSQL DDL을 �
 
 서버 재시작 후 DB 세션 재사용, 90일/10분 경계, 쿠키 속성·수명, CSRF 로그인/로그아웃 후 재발급,
 세션 고정·로그아웃 재사용 거부, 공식 스키마 일치, V1/V2 체크섬 보존 및 기존 계정 회귀를 검증한다.
-iPhone 실기기/PWA 수동 검증과 실제 Google/Resend 연결·운영 배포는 수행하지 않았다.
+1C-1 자체 검증에는 iPhone/PWA·실서비스·운영 배포가 포함되지 않았다. 이후 이메일은
+1C-2-LIVE에서 실수신·로그인을 검증했고, Google의 현재 자동화/실브라우저 범위는 [OIDC 문서](google-oidc.md)를 따른다.
 
 ## 공식 근거
 

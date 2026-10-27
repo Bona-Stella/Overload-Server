@@ -2,7 +2,8 @@
 
 현재는 **인증 검증 후 호출할 서버 내부 경로**만 구현되어 있다.
 `AccountProvisioningService.provision(VerifiedIdentity, nickname)`은 계정 생성·재진입을 처리한다.
-이메일 OTP 검증·로그인 접점은 [007-1C-2](email-otp.md)에 구현했다. Google 검증·프론트 연동은 후속 범위다.
+이메일 OTP 접점은 [007-1C-2](email-otp.md), Google OIDC 검증 접점은 [007-1C-3A](google-oidc.md)에 구현했다.
+실제 Google 브라우저 로그인·프론트 연동은 별도 준비/검증이 필요하다.
 공개 계정 생성 HTTP API, 테스트용 HTTP 우회 경로, 앱 시작 시 임의 계정/seed 생성은 없다.
 007-1C-1의 보안·세션 기반과 검증 후 내부 호출 접점은 [보안·세션 문서](security-session.md)를 따른다.
 

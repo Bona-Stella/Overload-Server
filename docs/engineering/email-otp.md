@@ -1,8 +1,9 @@
 # 이메일 OTP 로그인·Resend (Task 007-1C-2)
 
 이메일 OTP 발급·검증·계정 프로비저닝·JDBC 인증 세션 경로를 구현했다.
-실메일은 기본 비활성화다. 현재 검증은 fake sender와 로컬 Resend HTTP 스텁을 사용했으며
-실제 발송·수신은 검증하지 않았다. Google OIDC·계정 연결/변경·민감 작업 재인증은 후속 범위다.
+실메일은 기본 비활성화다. 1C-2 자동화는 fake sender와 로컬 Resend HTTP 스텁을 사용했고,
+후속 1C-2-LIVE에서 별도 승인한 실발송·수신·PostgreSQL 로그인을 검증했다.
+Google OIDC 서버는 [1C-3A](google-oidc.md)로 추가했다. 계정 연결/변경·민감 작업 재인증은 후속 범위다.
 
 ## HTTP 계약
 
@@ -96,6 +97,7 @@ PENDING/HMAC/쿨다운을 커밋한다. **열린 쓰기 트랜잭션 없이** �
 `spring.session.jdbc.flush-mode=immediate`와 **저장소 재조회**로 실제 SecurityContext·계정·메타데이터를
 확인한 뒤에만 204를 반환한다. 채택 버전은 일부 속성 무결성 오류를 동시 삭제로 간주해 생략할 수 있으므로
 단순 save/메모리 속성만으로 성공을 판단하지 않는다. 즉시 저장은 세션 DB 쓰기가 늘어나는 선택이다.
+1C-3A에서 이 저장·재조회 경로를 VerifiedSessionLogin으로 공용화하고 저장 메타데이터 전체 일치를 확인한다.
 
 - 계정 실패: 기존 계정/seed 원자적 트랜잭션은 롤백하고 브라우저 claim을 해제한다.
   **소비 코드를 되살리지 않는다.** 쿨다운 후 새 OTP로 재시도한다.
@@ -134,7 +136,9 @@ connect 3초/request 5초, redirect·자동 재시도 없음. `Idempotency-Key: 
 로그인/로그아웃 뒤 새 CSRF를 얻고 OTP를 영속 저장소·URL·콘솔에 기록하지 않는다.
 `/__otp_test__/*`와 fake sender는 테스트 전용이며 프론트가 호출할 제품 API가 아니다.
 
-실제 iPhone/PWA·실메일·Google·운영 검증은 수행하지 않았다. [검증 보고서](../tasks/task-007-1c-2-validation-report.md) 참조.
+1C-2 자동화에는 실제 iPhone/PWA·실메일·Google·운영 검증이 포함되지 않는다.
+이메일 실수신/로그인은 별도 LIVE에서 확인했으며, Google 실브라우저·iPhone/PWA·운영 검증은 아직 하지 않았다.
+[1C-2 검증 보고서](../tasks/task-007-1c-2-validation-report.md)와 [Google 안내](google-oidc.md)를 구분해 따른다.
 
 - [Resend API](https://resend.com/docs/api-reference/emails/send-email)
 - [Resend 멱등 키](https://resend.com/docs/dashboard/emails/idempotency-keys)

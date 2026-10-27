@@ -1,8 +1,10 @@
 package com.overload.overload_server.security;
 
+import com.overload.overload_server.auth.google.GoogleOidcSecurity;
 import jakarta.servlet.DispatcherType;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.context.annotation.Bean;
@@ -33,6 +35,12 @@ import java.util.List;
 @Configuration(proxyBeanMethods = false)
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 public class SecurityConfiguration {
+
+	private final ObjectProvider<GoogleOidcSecurity> google;
+
+	public SecurityConfiguration(ObjectProvider<GoogleOidcSecurity> google) {
+		this.google = google;
+	}
 
 	@Bean
 	@ConditionalOnMissingBean(Clock.class)
@@ -74,7 +82,7 @@ public class SecurityConfiguration {
 
 	@Bean
 	AuthenticationManager authenticationManager() {
-		// Prevent a generated development user; actual providers belong to the next authentication step.
+		// Block generated/password users. OIDC providers are installed only in the explicitly enabled HTTP chain.
 		return authentication -> { throw new ProviderNotFoundException("No login provider configured"); };
 	}
 
@@ -88,7 +96,7 @@ public class SecurityConfiguration {
 			writeError(response, anonymous ? 401 : 403, anonymous ? "AUTHENTICATION_REQUIRED"
 					: exception instanceof CsrfException ? "CSRF_INVALID" : "ACCESS_DENIED");
 		};
-		return http.formLogin(AbstractHttpConfigurer::disable).httpBasic(AbstractHttpConfigurer::disable)
+		http.formLogin(AbstractHttpConfigurer::disable).httpBasic(AbstractHttpConfigurer::disable)
 				.requestCache(cache -> cache.requestCache(new NullRequestCache()))
 				.securityContext(context -> context.securityContextRepository(contexts).requireExplicitSave(true))
 				.csrf(config -> config.csrfTokenRepository(csrf).ignoringRequestMatchers(request ->
@@ -97,6 +105,8 @@ public class SecurityConfiguration {
 				.authorizeHttpRequests(authorize -> authorize.dispatcherTypeMatchers(DispatcherType.ERROR).permitAll()
 						.requestMatchers("/api/v1/health").permitAll()
 						.requestMatchers(org.springframework.http.HttpMethod.GET, "/api/v1/auth/csrf").permitAll()
+						.requestMatchers(org.springframework.http.HttpMethod.GET, "/oauth2/authorization/google",
+								"/login/oauth2/code/google", "/auth/google/failure").permitAll()
 						.requestMatchers(org.springframework.http.HttpMethod.POST,
 								"/api/v1/auth/email-otp/request", "/api/v1/auth/email-otp/verify").permitAll()
 						.anyRequest().authenticated())
@@ -104,8 +114,12 @@ public class SecurityConfiguration {
 						writeError(response, 401, "AUTHENTICATION_REQUIRED")).accessDeniedHandler(denied))
 				.logout(logout -> logout.logoutUrl("/api/v1/auth/logout")
 						.logoutSuccessHandler((request, response, authentication) -> response.setStatus(204)))
-				.addFilterAfter(new SessionExpiryFilter(policy), SecurityContextHolderFilter.class)
-				.build();
+				.addFilterAfter(new SessionExpiryFilter(policy), SecurityContextHolderFilter.class);
+		var oidc = google.getIfAvailable();
+		if (oidc != null) {
+			oidc.configure(http);
+		}
+		return http.build();
 	}
 
 	private static void writeError(HttpServletResponse response, int status, String code) throws IOException {

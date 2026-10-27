@@ -2,7 +2,8 @@
 
 Task 007의 개발 환경이다. Windows/WSL에 PostgreSQL을 직접 설치하지 않는다.
 007-1B의 내부 계정·개인 종목 seed는 [별도 문서](account-provisioning.md)를 따른다.
-운영 서버 연결·배포 설정이 아니며, 실제 인증·공개 계정 API·운동 기록 기능은 후속 작업이다.
+운영 서버 연결·배포 설정이 아니다. 이메일 OTP와 선택적 Google OIDC 서버 인증은 구현했으며,
+공개 임의 계정 생성 API·운동 기록 기능은 구현하지 않았다.
 
 ## 준비 및 충돌 확인
 
@@ -136,10 +137,11 @@ git diff --check
 - 테스트가 만든 일회성 컨테이너·볼륨은 Testcontainers가 정리한다. 개발용 Compose 볼륨과 분리된다.
 
 `local`에서만 HTTP 개발용 세션 쿠키 Secure 예외를 허용한다. 다른 프로필과 production/prod 혼합
-프로필은 Secure를 강제한다. 실제 로그인 경로는 아직 없으며 세션/CSRF 기반과 테스트 fixture의
-경계는 [보안·세션 문서](security-session.md)를 따른다.
+프로필은 Secure를 강제한다. 실제 로그인 경로·세션/CSRF와 테스트 fixture의 경계는
+[보안·세션 문서](security-session.md)를 따른다.
 이메일 OTP의 Resend 실발송은 기본 비활성이다. [키 설정·실발송 승인 조건](email-otp.md)을 따른다.
 JDBC 세션은 immediate flush로 저장하며 OTP 성공 응답 전 저장소 확인을 수행한다.
+Google OIDC는 별도 [활성화·클라이언트 설정](google-oidc.md)이 필요하며 기존 V1~V4만 사용한다.
 
 Health 계약은 `GET /api/v1/health` → 200 / `{"status":"UP"}`, POST → 405이며
 응답은 DB/외부 서비스 상태를 의미하지 않는다.

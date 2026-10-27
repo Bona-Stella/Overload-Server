@@ -28,7 +28,7 @@
 
 `overload-server`는 사용자 계정, 운동 종목, 운동 세션, 세트별 기록, 루틴 및 통계 데이터를 관리하고 클라이언트 앱에 REST API를 제공하는 백엔드 프로젝트입니다.
 
-> 🚧 현재 Health API, PostgreSQL·Flyway, 계정 프로비저닝·운영 seed, Security·JDBC 세션·CSRF와 이메일 OTP 로그인 서버가 구현되어 있습니다. Resend 실발송은 기본 비활성·미검증이며 Google OIDC·운동 CRUD·프론트 연동은 아직 미구현입니다. 아래 주요 기능과 API는 개발 목표입니다.
+> 🚧 Health API, PostgreSQL·Flyway, 계정 프로비저닝·운영 seed, Security·JDBC 세션·CSRF, 이메일 OTP와 선택적 Google OIDC 로그인 서버가 구현되어 있습니다. 이메일은 Resend 실수신·로그인을 검증했고 실발송 기본값은 비활성입니다. Google은 서명된 로컬 OIDC 통합 테스트로 검증했으며 실제 Google 브라우저 로그인·운동 CRUD·프론트 연동은 후속입니다. 아래 주요 기능과 API는 개발 목표입니다.
 
 ---
 
@@ -106,8 +106,8 @@ Java 및 Spring Boot 기반의 REST API 서버를 개발합니다.
 | Framework Core | Spring Framework | 7.x |
 | Build Tool | Gradle | 9.8.2 |
 | ORM | Spring Data JPA / Hibernate | 미도입 (후속 도메인 단계에서 검토) |
-| Security | Spring Security | 7.1.2 기반 구성 (실제 로그인 미구현) |
-| Authentication | Google OIDC + 이메일 OTP(Resend) / Spring Session JDBC 쿠키 세션 | 이메일 OTP 서버 구현, Resend 실발송·Google 검증 미완료 |
+| Security | Spring Security | 7.1.2, CSRF·OTP·선택적 OIDC 로그인 |
+| Authentication | Google OIDC + 이메일 OTP(Resend) / Spring Session JDBC 쿠키 세션 | 이메일 실수신 검증, Google 서버 구현·실브라우저 검증 전 |
 | Validation | Jakarta Validation | Starter 구성 완료 |
 
 ### Database & Infrastructure
@@ -348,6 +348,7 @@ curl.exe -i -X POST http://localhost:8080/api/v1/health
 V3 세션 테이블·실제 HTTP/HTTPS 쿠키·CSRF·90일 절대 만료·10분 재인증 경계도 검증합니다.
 보안 응답과 프론트의 토큰 조회·갱신 계약은 [보안·세션 문서](docs/engineering/security-session.md)를 참고합니다.
 이메일 OTP 상태·제한·실패 복구·Resend 설정과 실발송 승인 조건은 [이메일 OTP 문서](docs/engineering/email-otp.md)를 따릅니다.
+Google 클라이언트 준비·정확한 localhost 콜백·활성화·세션 상태 조회는 [Google OIDC 문서](docs/engineering/google-oidc.md)를 따릅니다.
 운영 종목 20개와 휴식 구간, 신원/트랜잭션 계약 및 후속 연동 사항은
 [계정 프로비저닝 문서](docs/engineering/account-provisioning.md)를 참고합니다.
 
