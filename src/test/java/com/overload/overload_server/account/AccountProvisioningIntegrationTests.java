@@ -75,7 +75,8 @@ class AccountProvisioningIntegrationTests {
 		assertThat(jdbc.queryForList("""
 				SELECT table_name FROM information_schema.tables
 				WHERE table_schema = 'public' ORDER BY table_name
-				""", String.class)).containsExactly("auth_identities", "exercise_definitions",
+				""", String.class)).containsExactly("auth_identities", "email_otp_challenges", "email_otp_limits",
+				"email_otp_login_claims", "email_otp_rate_limits", "exercise_definitions",
 				"flyway_schema_history", "spring_session", "spring_session_attributes", "user_workout_settings", "users");
 	}
 

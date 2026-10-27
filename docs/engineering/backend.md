@@ -809,7 +809,9 @@ API 오류 응답에는 RFC 9457 기반
 Spring Security를 인증 및 인가의 기본 도구로 사용합니다.
 
 - MVP 인증은 최종 설계 3절의 Google OIDC + 이메일 OTP(Resend), Spring Session JDBC/PostgreSQL 기반 쿠키 세션을 따릅니다.
-- Spring Security·Session JDBC 기반은 007-1C-1에서 도입했으나 실제 Google/OTP 인증은 아직 미구현입니다.
+- Spring Security·Session JDBC 기반은 007-1C-1에서 도입했습니다. 007-1C-2에서 이메일 OTP 서버를 구현했으며,
+  Resend 실발송 및 Google OIDC 검증은 아직 완료하지 않았습니다.
+- 이메일 OTP의 상태·트랜잭션·제한·환경 설정은 [이메일 OTP 문서](email-otp.md)를 따릅니다.
 - 현재 세션·쿠키·CSRF·보안 응답 및 후속 연동 계약은 [보안·세션 문서](security-session.md)를 따릅니다.
 - 보호 대상 Endpoint와 공개 Endpoint를 명확히 구분합니다.
 - 인증되지 않은 접근에 적절한 오류를 반환합니다.

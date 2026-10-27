@@ -12,3 +12,6 @@ spring:
     timeout: 30m
     jdbc:
       initialize-schema: never
+      flush-mode: immediate
+server:
+  forward-headers-strategy: none

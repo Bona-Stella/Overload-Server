@@ -98,7 +98,7 @@ SELECT count(*) FROM users;
 ## 스키마 정책
 
 - Spring Boot 시작 시 Flyway가 `classpath:db/migration`의 버전 SQL을 적용·검증한다.
-- `V1__create_users.sql`, `V2__create_account_provisioning.sql`, `V3__create_spring_session.sql`을 순서대로 적용한다.
+- V1 users → V2 계정 기반 → V3 Spring Session → V4 이메일 OTP 순서로 적용한다.
   `users.id`는 서버가 공급할 UUID PK이며 DB 자동 UUID 기본값은 없다.
 - `data_generation BIGINT NOT NULL DEFAULT 0`, `CHECK (data_generation >= 0)`다.
   후속 초기화 트랜잭션에서 서버가 관리하며 클라이언트 쓰기 권한/API는 아직 없다.
@@ -108,7 +108,7 @@ SELECT count(*) FROM users;
 - V2는 신원·개인 웨이트 종목·휴식 설정 기반을 추가한다. 마이그레이션/앱 시작은 계정 seed를 생성하지 않는다.
   검증된 신원에 대한 내부 프로비저닝에서만 개인 seed를 생성한다.
   V3는 공식 Spring Session JDBC 테이블·인덱스를 생성하며 Session 자체 DDL 실행은 비활성화한다.
-  OTP·루틴·운동 기록·동기화 테이블은 아직 없다.
+  V4는 OTP 발급·제한·로그인 claim을 추가한다. 루틴·운동 기록·동기화 테이블은 아직 없다.
 - 스키마 변경 경로는 Flyway 하나다. 기본 SQL 초기화는 비활성화하고,
   Flyway clean은 차단하며 자동 baseline은 사용하지 않는다. JPA/Hibernate는 도입하지 않았다.
 - 적용한 버전 SQL을 수정하지 않는다. 이후 변경은 V2 이상 새 마이그레이션으로 추가한다.
@@ -138,6 +138,8 @@ git diff --check
 `local`에서만 HTTP 개발용 세션 쿠키 Secure 예외를 허용한다. 다른 프로필과 production/prod 혼합
 프로필은 Secure를 강제한다. 실제 로그인 경로는 아직 없으며 세션/CSRF 기반과 테스트 fixture의
 경계는 [보안·세션 문서](security-session.md)를 따른다.
+이메일 OTP의 Resend 실발송은 기본 비활성이다. [키 설정·실발송 승인 조건](email-otp.md)을 따른다.
+JDBC 세션은 immediate flush로 저장하며 OTP 성공 응답 전 저장소 확인을 수행한다.
 
 Health 계약은 `GET /api/v1/health` → 200 / `{"status":"UP"}`, POST → 405이며
 응답은 DB/외부 서비스 상태를 의미하지 않는다.

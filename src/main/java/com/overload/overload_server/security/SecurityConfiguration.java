@@ -97,6 +97,8 @@ public class SecurityConfiguration {
 				.authorizeHttpRequests(authorize -> authorize.dispatcherTypeMatchers(DispatcherType.ERROR).permitAll()
 						.requestMatchers("/api/v1/health").permitAll()
 						.requestMatchers(org.springframework.http.HttpMethod.GET, "/api/v1/auth/csrf").permitAll()
+						.requestMatchers(org.springframework.http.HttpMethod.POST,
+								"/api/v1/auth/email-otp/request", "/api/v1/auth/email-otp/verify").permitAll()
 						.anyRequest().authenticated())
 				.exceptionHandling(errors -> errors.authenticationEntryPoint((request, response, exception) ->
 						writeError(response, 401, "AUTHENTICATION_REQUIRED")).accessDeniedHandler(denied))

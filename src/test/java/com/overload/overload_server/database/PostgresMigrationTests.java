@@ -56,21 +56,24 @@ class PostgresMigrationTests {
 			assertThat(jdbc.queryForList("""
 					SELECT table_name FROM information_schema.tables
 					WHERE table_schema = 'public' ORDER BY table_name
-					""", String.class)).containsExactly("auth_identities", "exercise_definitions",
+					""", String.class)).containsExactly("auth_identities", "email_otp_challenges", "email_otp_limits",
+					"email_otp_login_claims", "email_otp_rate_limits", "exercise_definitions",
 					"flyway_schema_history", "spring_session", "spring_session_attributes", "user_workout_settings", "users");
 			assertThat(jdbc.queryForObject("SELECT count(*) FROM users", Integer.class)).isZero();
-			assertThat(flyway.info().current().getVersion().toString()).isEqualTo("3");
+			assertThat(flyway.info().current().getVersion().toString()).isEqualTo("4");
 			assertThat(flyway.getConfiguration().isCleanDisabled()).isTrue();
 			assertThat(flyway.getConfiguration().isBaselineOnMigrate()).isFalse();
 			flyway.validate();
 			history = jdbc.queryForList("SELECT * FROM flyway_schema_history ORDER BY installed_rank");
-			assertThat(history).hasSize(3);
+			assertThat(history).hasSize(4);
 			assertThat(history.getFirst()).containsEntry("version", "1")
 					.containsEntry("script", "V1__create_users.sql").containsEntry("success", true);
 			assertThat(history.get(1)).containsEntry("version", "2")
 					.containsEntry("script", "V2__create_account_provisioning.sql").containsEntry("success", true);
 			assertThat(history.get(2)).containsEntry("version", "3")
 					.containsEntry("script", "V3__create_spring_session.sql").containsEntry("success", true);
+			assertThat(history.get(3)).containsEntry("version", "4")
+					.containsEntry("script", "V4__create_email_otp.sql").containsEntry("success", true);
 			jdbc.update("INSERT INTO users (id) VALUES (?)", userId);
 			var user = jdbc.queryForMap("SELECT * FROM users WHERE id = ?", userId);
 			assertThat(user).containsEntry("id", userId).containsEntry("data_generation", 0L)
@@ -125,9 +128,30 @@ class PostgresMigrationTests {
 		var checksums = java.util.Arrays.stream(v2.info().applied()).map(info -> info.getChecksum()).toList();
 		try (var context = startApplication(WebApplicationType.NONE)) {
 			var latest = context.getBean(Flyway.class);
-			assertThat(latest.info().current().getVersion().toString()).isEqualTo("3");
+			assertThat(latest.info().current().getVersion().toString()).isEqualTo("4");
 			assertThat(java.util.Arrays.stream(latest.info().applied()).limit(2).map(info -> info.getChecksum()).toList())
 					.isEqualTo(checksums);
+			assertThat(latest.migrate().migrationsExecuted).isZero();
+		}
+	}
+
+	@Test
+	void upgradesV3WithAllExistingChecksumsAndUserDataUnchanged() throws Exception {
+		var old = Flyway.configure().dataSource(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword())
+				.target("3").load();
+		old.migrate();
+		var checksums = java.util.Arrays.stream(old.info().applied()).map(info -> info.getChecksum()).toList();
+		var userId = UUID.randomUUID();
+		try (var connection = DriverManager.getConnection(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword());
+			 var insert = connection.prepareStatement("INSERT INTO users (id, data_generation) VALUES (?, 11)")) {
+			insert.setObject(1, userId); insert.executeUpdate();
+		}
+		try (var context = startApplication(WebApplicationType.NONE)) {
+			var latest = context.getBean(Flyway.class);
+			assertThat(java.util.Arrays.stream(latest.info().applied()).limit(3).map(info -> info.getChecksum()).toList())
+					.isEqualTo(checksums);
+			assertThat(context.getBean(JdbcTemplate.class).queryForObject("SELECT data_generation FROM users WHERE id = ?",
+					Long.class, userId)).isEqualTo(11L);
 			assertThat(latest.migrate().migrationsExecuted).isZero();
 		}
 	}
