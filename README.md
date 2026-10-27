@@ -107,7 +107,7 @@ Java 및 Spring Boot 기반의 REST API 서버를 개발합니다.
 | Build Tool | Gradle | 9.8.2 |
 | ORM | Spring Data JPA / Hibernate | 도입 예정 (의존성 주석 처리) |
 | Security | Spring Security | 도입 예정 |
-| Authentication | JWT | 검토 예정 |
+| Authentication | Google OIDC + 이메일 OTP(Resend) / Spring Session JDBC 쿠키 세션 | Task 006 설계 확정·미구현 |
 | Validation | Jakarta Validation | Starter 구성 완료 |
 
 ### Database & Infrastructure
@@ -257,7 +257,7 @@ Base URL:
 | GET | `/api/v1/statistics/progress` | 운동 기록 변화 조회 |
 | GET | `/api/v1/statistics/records` | 개인 최고 기록 조회 |
 
-> 위 API는 초기 설계안입니다. 요청 및 응답 DTO, 인증 방식, 상세 API 명세는 개발 과정에서 확정합니다.
+> 위 API는 초기 설계안입니다. 인증은 [Task 006 최종 설계 v0.3.1](docs/tasks/task-006-integrated-design-v0.3.1.md)의 쿠키 세션 방식을 따르며 아직 미구현입니다. 요청 및 응답 DTO, 경로 등 남은 기술 계약은 개발 과정에서 검증·확정합니다.
 
 ---
 
