@@ -16,7 +16,7 @@
   <img src="https://img.shields.io/badge/Java-25%20LTS-ED8B00?style=flat-square&amp;logo=openjdk&amp;logoColor=white" alt="Java">
   <img src="https://img.shields.io/badge/Spring%20Boot-4.1.2-6DB33F?style=flat-square&amp;logo=springboot&amp;logoColor=white" alt="Spring Boot">
   <img src="https://img.shields.io/badge/Gradle-9.8.2-02303A?style=flat-square&amp;logo=gradle&amp;logoColor=white" alt="Gradle">
-  <img src="https://img.shields.io/badge/PostgreSQL-Planned-4169E1?style=flat-square&amp;logo=postgresql&amp;logoColor=white" alt="PostgreSQL Planned">
+  <img src="https://img.shields.io/badge/PostgreSQL-18.6-4169E1?style=flat-square&amp;logo=postgresql&amp;logoColor=white" alt="PostgreSQL 18.6">
   <img src="https://img.shields.io/badge/Status-Initial_Setup-6B7280?style=flat-square" alt="Status">
 </div>
 
@@ -28,7 +28,7 @@
 
 `overload-server`는 사용자 계정, 운동 종목, 운동 세션, 세트별 기록, 루틴 및 통계 데이터를 관리하고 클라이언트 앱에 REST API를 제공하는 백엔드 프로젝트입니다.
 
-> 🚧 현재 Spring Boot 초기 프로젝트가 구성되어 있습니다. 애플리케이션 진입점, MVC·Validation 의존성, 컨텍스트 로딩 테스트가 있으며, 업무 API·인증·DB 연동은 아직 구현되지 않았습니다. 아래 주요 기능과 API는 개발 목표입니다.
+> 🚧 현재 Health API와 Docker Compose 기반 로컬 PostgreSQL·Flyway 기반이 구현되어 있습니다. 최소 `users` 스키마와 실제 PostgreSQL 통합 테스트가 있으며, 업무 API·인증·운영 seed는 아직 구현되지 않았습니다. 아래 주요 기능과 API는 개발 목표입니다.
 
 ---
 
@@ -105,7 +105,7 @@ Java 및 Spring Boot 기반의 REST API 서버를 개발합니다.
 | Framework | Spring Boot | 4.1.2 |
 | Framework Core | Spring Framework | 7.x |
 | Build Tool | Gradle | 9.8.2 |
-| ORM | Spring Data JPA / Hibernate | 도입 예정 (의존성 주석 처리) |
+| ORM | Spring Data JPA / Hibernate | 미도입 (후속 도메인 단계에서 검토) |
 | Security | Spring Security | 도입 예정 |
 | Authentication | Google OIDC + 이메일 OTP(Resend) / Spring Session JDBC 쿠키 세션 | Task 006 설계 확정·미구현 |
 | Validation | Jakarta Validation | Starter 구성 완료 |
@@ -114,10 +114,10 @@ Java 및 Spring Boot 기반의 REST API 서버를 개발합니다.
 
 | Category | Technology | Version / Status |
 |:---|:---|:---|
-| RDBMS | PostgreSQL | 18.6 (도입 예정) |
-| DB Migration | Flyway | 도입 검토 |
-| Container | Docker | 도입 예정 |
-| Local Environment | Docker Compose | 도입 예정 |
+| RDBMS | PostgreSQL | 18.6 (로컬 개발·테스트) |
+| DB Migration | Flyway | 12.4.0 (Boot BOM 관리) |
+| Container | Docker | 로컬 PostgreSQL / 테스트 컨테이너 |
+| Local Environment | Docker Compose | `compose.yaml` |
 
 ### Testing & Documentation
 
@@ -125,7 +125,7 @@ Java 및 Spring Boot 기반의 REST API 서버를 개발합니다.
 |:---|:---|
 | Unit Test | JUnit |
 | Integration Test | Spring Boot Test |
-| Container Test | Testcontainers (도입 예정) |
+| Container Test | Testcontainers 2.0.5 (Boot BOM 관리) |
 | API Documentation | OpenAPI / Swagger UI (도입 예정) |
 
 > 라이브러리 버전은 가능한 한 Spring Boot의 의존성 관리 설정(BOM)을 따릅니다. 실제 적용 버전은 호환성 검증 후 확정합니다.
@@ -184,10 +184,12 @@ overload-server/
 ├── src/
 │   ├── main/
 │   │   ├── java/com/overload/overload_server/OverloadServerApplication.java
-│   │   └── resources/application.yaml
+│   │   └── resources/ (application.yaml, application-local.yaml, db/migration/)
 │   └── test/java/com/overload/overload_server/OverloadServerApplicationTests.java
 ├── .gitattributes
 ├── .gitignore
+├── .env.example
+├── compose.yaml
 ├── build.gradle
 ├── settings.gradle
 ├── gradlew
@@ -267,7 +269,7 @@ Base URL:
 
 - JDK 25
 - Gradle Wrapper
-- Docker / Docker Compose (DB 컨테이너 사용 시)
+- 실행 중인 Docker Desktop Linux 엔진 / Docker Compose
 
 ### Clone Repository
 
@@ -280,16 +282,20 @@ cd overload-server
 
 ### Run Application
 
+먼저 [로컬 PostgreSQL 실행 문서](docs/engineering/local-postgresql.md)에 따라
+`.env`에 비밀값을 준비하고 `docker compose up -d --wait --wait-timeout 120 postgres`를 실행합니다.
+기존 5432 DB와 분리된 `127.0.0.1:5433` 및 전용 영속 볼륨을 사용합니다.
+
 **macOS / Linux**
 
 ```bash
-./gradlew bootRun
+./gradlew --no-daemon bootRun --args='--spring.profiles.active=local'
 ```
 
 **Windows**
 
 ```powershell
-.\gradlew.bat bootRun
+.\gradlew.bat --no-daemon bootRun --args='--spring.profiles.active=local'
 ```
 
 Windows에서 Java가 PATH에 없다면, 설치된 JDK 25 경로를 현재 PowerShell 프로세스에만 지정한 뒤 실행합니다. 아래 경로는 실제 설치 위치로 바꿉니다. 영구 환경변수를 변경할 필요는 없습니다.
@@ -299,7 +305,10 @@ $env:JAVA_HOME = 'C:\path\to\jdk-25'
 .\gradlew.bat --version
 ```
 
-현재는 JPA·PostgreSQL 의존성이 비활성화되어 있어 DB 연결 없이 초기 애플리케이션을 실행하는 구성입니다. 포트·HTTPS 설정은 별도로 지정하지 않았으며, 기본 HTTP 포트는 `8080`입니다. `/api/v1` 업무 API는 아직 없습니다.
+`local` 프로필은 저장소 루트 `.env`로 PostgreSQL에 연결하고 Flyway를 적용합니다.
+다른 프로필은 표준 `SPRING_DATASOURCE_URL`·`SPRING_DATASOURCE_USERNAME`·`SPRING_DATASOURCE_PASSWORD`로 설정합니다.
+DB 없이 실행하는 앱 구성은 아니며 JPA는 아직 도입하지 않았습니다. 기본 HTTP 포트는 `8080`입니다.
+Health 이외의 `/api/v1` 업무 API는 아직 없습니다.
 
 ### Health Check API (구현 완료)
 
@@ -318,18 +327,23 @@ curl.exe -i http://localhost:8080/api/v1/health
 curl.exe -i -X POST http://localhost:8080/api/v1/health
 ```
 
-검증 후 서버 실행 터미널에서 `Ctrl+C`로 종료합니다.
+검증 후 서버 실행 터미널에서 `Ctrl+C`로 종료하고 `docker compose stop postgres`로 DB를 중지합니다.
+볼륨은 보존됩니다. 재시작·접속·포트 충돌·비밀값 관리 방법은 [로컬 PostgreSQL 문서](docs/engineering/local-postgresql.md)를 참고합니다.
 
 ### 테스트 및 빌드
 
 ```powershell
-.\gradlew.bat --offline test
-.\gradlew.bat --offline build
+.\gradlew.bat --no-daemon test
+.\gradlew.bat --no-daemon integrationTest
+.\gradlew.bat --no-daemon build
 ```
 
-오프라인 실행에는 Gradle 배포판과 의존성 캐시가 필요합니다. 캐시가 부족하면 의존성 해석 단계에서 실패할 수 있으므로 컴파일·테스트 실패와 구분합니다. 새 환경에서 캐시를 준비하려면 다운로드가 필요합니다.
+`integrationTest`와 이를 포함하는 `check`·`build`에는 Docker가 필요합니다.
+초기 실행은 Gradle 배포판·의존성·컨테이너 이미지 다운로드가 필요합니다.
+`--offline`은 Gradle 캐시가 준비된 경우에만 사용합니다.
 
-현재 테스트는 `contextLoads()` 1개와 Health Check MVC 테스트 2개입니다. Health Check 테스트는 GET의 HTTP 200·JSON Content-Type·정확한 응답 구조와 값, POST의 HTTP 405를 검증합니다. 업무 로직·DB 통합 테스트는 아직 없습니다.
+`test`는 DB 없이 컨텍스트 로딩 1개와 Health MVC 계약 2개를 검증합니다.
+`integrationTest`는 개발 DB와 분리된 일회성 PostgreSQL에서 최초 마이그레이션·재시작 멱등성·스키마와 제약·실제 HTTP Health 계약 3개를 검증합니다.
 
 ---
 
@@ -338,7 +352,7 @@ curl.exe -i -X POST http://localhost:8080/api/v1/health
 ### Phase 1. 프로젝트 기반 구축
 - [x] Spring Boot 프로젝트 생성
 - [x] Gradle 및 MVC·Validation 의존성 구성
-- [ ] PostgreSQL 연동
+- [x] 로컬 PostgreSQL·Flyway 연동 (최소 users 스키마)
 - [ ] 공통 예외 처리 및 응답 규약 설계
 - [x] Spring Boot 컨텍스트 로딩 테스트 구성
 

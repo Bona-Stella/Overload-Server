@@ -1,0 +1,155 @@
+# 로컬 PostgreSQL · Flyway
+
+Task 007-1A의 개발 환경이다. Windows/WSL에 PostgreSQL을 직접 설치하지 않는다.
+운영 서버 연결·배포 설정이 아니며, 인증·계정 API·운동 테이블·운영 seed는 후속 작업이다.
+
+## 준비 및 충돌 확인
+
+- JDK 25, 저장소의 Gradle Wrapper, 실행 중인 Docker Desktop Linux 엔진과 Docker Compose가 필요하다.
+- Windows PowerShell에서 저장소 루트(`build.gradle` 위치)를 작업 디렉터리로 사용한다.
+- WSL 배포판에 PostgreSQL을 설치하거나 WSL/Docker 시스템 설정을 바꿀 필요가 없다.
+
+```powershell
+docker version
+docker compose version
+wsl --status
+wsl --list --verbose
+docker ps -a --format '{{.Names}} {{.Image}} {{.Ports}} {{.Status}}'
+docker volume ls
+Get-NetTCPConnection -State Listen | Where-Object LocalPort -in 5432,5433
+```
+
+기존 컨테이너·볼륨·DB에는 접속하거나 마이그레이션하지 않는다. 이 구성의 기본 식별자는
+프로젝트 `overload-local`, 서비스 `postgres`, 컨테이너 `overload-local-postgres-1`,
+볼륨 `overload-local_postgres_data`다. 같은 식별자의 기존 리소스가 있다면 먼저 소유·용도를 확인한다.
+기존 PostgreSQL이 흔히 사용하는 5432 대신 **127.0.0.1:5433**에만 공개한다.
+5433도 사용 중이면 기존 서비스를 중지하지 말고 `.env`의 `POSTGRES_PORT`를 빈 포트로 변경한다.
+
+## 비밀값 준비
+
+`.env.example`은 비밀번호가 없는 설명 예시이며 `.env`는 Git에서 제외된다.
+최초 한 번 아래 명령으로 로컬 전용 비밀번호를 생성한다. 기존 `.env`는 덮어쓰지 않는다.
+
+```powershell
+if (Test-Path .env) { throw '.env already exists; keep the existing file.' }
+$localPassword = [Convert]::ToHexString([System.Security.Cryptography.RandomNumberGenerator]::GetBytes(32))
+$localConfig = (Get-Content .env.example -Raw).Replace('POSTGRES_PASSWORD=', "POSTGRES_PASSWORD=$localPassword")
+[System.IO.File]::WriteAllText((Join-Path $PWD '.env'), $localConfig)
+Remove-Variable localPassword,localConfig
+git check-ignore .env
+docker compose config --quiet
+```
+
+위 생성 명령은 PowerShell 7 / 최신 .NET 기준이다. 다른 셸에서는 `.env.example`을 `.env`로
+복사하고 `POSTGRES_PASSWORD`에 로컬 전용 임의 값을 직접 입력해도 된다.
+Compose dotenv와 Spring properties 양쪽에서 동일하게 해석되도록 값은 **따옴표 없이
+영문·숫자·밑줄·하이픈만** 사용한다. `.env` 내용이나 비밀값이 펼쳐지는 `docker compose config`
+출력을 공유하거나 Git에 추가하지 않는다. 설정 검사는 `--quiet`를 사용한다.
+
+| 변수 | 용도 / 예시 기본값 |
+|---|---|
+| `POSTGRES_DB` | 새 로컬 개발 DB: `overload_dev` |
+| `POSTGRES_USER` | 새 로컬 개발 사용자: `overload_dev` |
+| `POSTGRES_PASSWORD` | 필수, 예시 파일에는 비어 있음 |
+| `POSTGRES_PORT` | 호스트 루프백 포트: `5433` |
+
+컨테이너 환경변수는 **빈 볼륨 최초 초기화** 때 DB/사용자/비밀번호를 만든다.
+기존 볼륨이 있는 상태에서 `.env`만 바꿔도 DB 자격정보가 바뀌지는 않는다.
+비밀번호를 분실하거나 접속이 실패해도 볼륨을 지우거나 기존 DB를 초기화하지 말고 원인을 확인한다.
+공식 이미지의 초기 사용자는 로컬 개발용 관리자이므로 이 구성을 운영 배포에 그대로 사용하지 않는다.
+
+## 실행 및 접속
+
+```powershell
+docker compose up -d --wait --wait-timeout 120 postgres
+docker compose ps
+.\gradlew.bat --no-daemon bootRun --args='--spring.profiles.active=local'
+```
+
+Java가 PATH에 없다면 실제 설치된 JDK 25 경로를 현재 터미널에만 지정한다.
+
+```powershell
+$env:JAVA_HOME = 'C:\path\to\jdk-25'
+.\gradlew.bat --no-daemon --version
+```
+
+`local` 프로필은 루트 `.env`를 명시적으로 읽어 JDBC URL·사용자·비밀번호를 구성한다.
+Spring Boot가 Compose를 자동 기동하지 않으므로 DB를 먼저 실행한다. 기본 앱 포트는 8080이다.
+아래 접속은 새 Overload DB에만 수행한다(변수를 바꿨으면 그 값으로 대체).
+
+```powershell
+docker compose exec postgres psql -U overload_dev -d overload_dev
+```
+
+SQL 예시:
+
+```sql
+SELECT version, script, checksum, success FROM flyway_schema_history ORDER BY installed_rank;
+SELECT count(*) FROM users;
+```
+
+`local` 이외의 실행에서는 `.env`를 자동으로 읽지 않는다. 표준 Spring 외부 설정
+`SPRING_DATASOURCE_URL`, `SPRING_DATASOURCE_USERNAME`, `SPRING_DATASOURCE_PASSWORD`를 제공한다.
+이 표준 환경변수는 `local` 프로필에서도 우선하므로, 이전 터미널의 다른 DB 설정이 남아 있지 않은지
+확인한다. 기존/운영 DB 주소를 사용하지 않는다. 연결정보가 없거나 DB에 연결할 수 없으면 시작이
+실패하며 H2로 대체하지 않는다.
+
+## 스키마 정책
+
+- Spring Boot 시작 시 Flyway가 `classpath:db/migration`의 버전 SQL을 적용·검증한다.
+- `V1__create_users.sql`만 존재한다. `users.id`는 서버가 공급할 UUID PK이며 DB 자동 UUID 기본값은 없다.
+- `data_generation BIGINT NOT NULL DEFAULT 0`, `CHECK (data_generation >= 0)`다.
+  후속 초기화 트랜잭션에서 서버가 관리하며 클라이언트 쓰기 권한/API는 아직 없다.
+- `nickname TEXT NULL`이며 닉네임 길이·고유성 등 미확정 제품 제약을 추가하지 않았다.
+- `created_at`, `updated_at`은 `TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP`다.
+  삽입 시 기본값만 제공하며, 후속 서버 갱신 로직이 `updated_at`을 명시적으로 유지해야 한다.
+- 인증·OTP·Spring Session·운동·동기화 테이블과 seed는 아직 없다.
+- 스키마 변경 경로는 Flyway 하나다. 기본 SQL 초기화는 비활성화하고,
+  Flyway clean은 차단하며 자동 baseline은 사용하지 않는다. JPA/Hibernate는 도입하지 않았다.
+- 적용한 버전 SQL을 수정하지 않는다. 이후 변경은 V2 이상 새 마이그레이션으로 추가한다.
+  비어 있지 않은 미관리 스키마에서 시작이 거부되면 자동 baseline/초기화로 우회하지 않는다.
+
+## 테스트와 빌드
+
+```powershell
+.\gradlew.bat --no-daemon test
+.\gradlew.bat --no-daemon integrationTest
+.\gradlew.bat --no-daemon build
+git diff --check
+```
+
+- `test`: DB 없이 컨텍스트 로딩·Health MVC 계약을 검증한다. DB 자동설정 제외는 해당
+  컨텍스트 테스트에만 적용하며 실행용 설정에서 DB 오류를 숨기지 않는다.
+- `integrationTest`: `postgres` 태그 테스트만 실행한다. Testcontainers PostgreSQL 18.6으로
+  각 테스트의 새 컨테이너·빈 DB·임의 포트·임의 비밀번호를 사용한다. `.env` 개발 DB를 사용하지 않는다.
+  최초 적용, 재시작 후 같은 적용 이력·사용자 보존, 스키마·제약, 실제 HTTP Health 계약을 검증한다.
+- `check`와 `build`는 통합 테스트도 포함하므로 Docker가 필요하다.
+  Docker가 없으면 통합 테스트는 실패하며 조용히 건너뛰지 않는다.
+- 초기 실행은 Gradle 의존성과 PostgreSQL/Ryuk 이미지 다운로드가 필요하다.
+  `--offline`은 Gradle 캐시가 준비된 경우에만 사용하며 Docker 이미지 다운로드까지 막지는 않는다.
+- 테스트가 만든 일회성 컨테이너·볼륨은 Testcontainers가 정리한다. 개발용 Compose 볼륨과 분리된다.
+
+Health 계약은 `GET /api/v1/health` → 200 / `{"status":"UP"}`, POST → 405이며
+응답은 DB/외부 서비스 상태를 의미하지 않는다.
+
+## 중지 및 재시작
+
+앱 실행 터미널에서 `Ctrl+C`로 서버를 종료한 뒤 DB를 중지한다.
+
+```powershell
+docker compose stop postgres
+docker compose ps -a
+```
+
+재개할 때는 `docker compose up -d --wait --wait-timeout 120 postgres`와 앱 실행 명령을 사용한다.
+볼륨은 보존되며 Flyway가 같은 마이그레이션을 중복 적용하지 않는다.
+PostgreSQL 18 공식 이미지의 데이터는 `/var/lib/postgresql`에 마운트한 전용 named volume에 저장한다.
+컨테이너를 재생성해도 같은 볼륨을 재사용한다. 볼륨 삭제 옵션, prune, 기존 DB 초기화는 수행하지 않는다.
+새 메이저 버전으로 이미지 태그만 바꿔 기존 볼륨을 재사용하지 않는다.
+
+## 근거
+
+- [Spring Boot 4.1.2 의존성 관리](https://docs.spring.io/spring-boot/appendix/dependency-versions/coordinates.html)
+- [Spring Boot Flyway 초기화](https://docs.spring.io/spring-boot/how-to/data-initialization.html)
+- [PostgreSQL 공식 이미지 · 18 데이터 경로](https://hub.docker.com/_/postgres)
+- [Testcontainers PostgreSQL 모듈](https://java.testcontainers.org/modules/databases/postgres/)

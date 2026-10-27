@@ -1,3 +1,10 @@
 spring:
   application:
     name: overload-server
+  sql:
+    init:
+      mode: never
+  flyway:
+    clean-disabled: true
+    baseline-on-migrate: false
+    validate-on-migrate: true

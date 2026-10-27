@@ -59,9 +59,9 @@ Task 007의 확정 정책과 구현 단계는 [Task 006 최종 설계 v0.3.1](..
 | Persistence | Spring Data JPA / Hibernate |
 | Validation | Jakarta Validation |
 | Security | Spring Security |
-| DB Migration | Flyway (도입 예정) |
+| DB Migration | Flyway (007-1A 도입, Boot BOM 관리) |
 | Testing | JUnit / Spring Boot Test |
-| Integration Testing | Testcontainers (도입 예정) |
+| Integration Testing | Testcontainers PostgreSQL (007-1A 도입, Boot BOM 관리) |
 | API Documentation | OpenAPI (도입 예정) |
 
 ### 2.2 버전 관리 원칙
@@ -594,6 +594,9 @@ Enum 저장 방식은 확장성을 고려하여 결정하며,
 ### 8.4 DB Migration
 
 스키마 버전 관리는 Flyway 도입을 권장합니다.
+
+현재 로컬 PostgreSQL·Flyway 구성과 검증 명령은 [로컬 실행 문서](local-postgresql.md)를 따릅니다.
+007-1A에서는 최소 `users` 테이블만 생성하며 아래 후속 SQL 파일명은 구조 예시입니다.
 
 권장 경로:
 
