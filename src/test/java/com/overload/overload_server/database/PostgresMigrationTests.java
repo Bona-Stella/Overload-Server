@@ -56,16 +56,19 @@ class PostgresMigrationTests {
 			assertThat(jdbc.queryForList("""
 					SELECT table_name FROM information_schema.tables
 					WHERE table_schema = 'public' ORDER BY table_name
-					""", String.class)).containsExactly("flyway_schema_history", "users");
+					""", String.class)).containsExactly("auth_identities", "exercise_definitions",
+					"flyway_schema_history", "user_workout_settings", "users");
 			assertThat(jdbc.queryForObject("SELECT count(*) FROM users", Integer.class)).isZero();
-			assertThat(flyway.info().current().getVersion().toString()).isEqualTo("1");
+			assertThat(flyway.info().current().getVersion().toString()).isEqualTo("2");
 			assertThat(flyway.getConfiguration().isCleanDisabled()).isTrue();
 			assertThat(flyway.getConfiguration().isBaselineOnMigrate()).isFalse();
 			flyway.validate();
 			history = jdbc.queryForList("SELECT * FROM flyway_schema_history ORDER BY installed_rank");
-			assertThat(history).hasSize(1);
+			assertThat(history).hasSize(2);
 			assertThat(history.getFirst()).containsEntry("version", "1")
 					.containsEntry("script", "V1__create_users.sql").containsEntry("success", true);
+			assertThat(history.get(1)).containsEntry("version", "2")
+					.containsEntry("script", "V2__create_account_provisioning.sql").containsEntry("success", true);
 			jdbc.update("INSERT INTO users (id) VALUES (?)", userId);
 			var user = jdbc.queryForMap("SELECT * FROM users WHERE id = ?", userId);
 			assertThat(user).containsEntry("id", userId).containsEntry("data_generation", 0L)
@@ -81,6 +84,33 @@ class PostgresMigrationTests {
 			assertThat(jdbc.queryForList("SELECT * FROM flyway_schema_history ORDER BY installed_rank"))
 					.isEqualTo(history);
 			assertThat(jdbc.queryForObject("SELECT id FROM users", UUID.class)).isEqualTo(userId);
+			assertThat(context.getBean(Flyway.class).migrate().migrationsExecuted).isZero();
+		}
+	}
+
+	@Test
+	void upgradesV1WithoutChangingExistingUsersOrApplyingSeedAtStartup() throws Exception {
+		var v1 = Flyway.configure().dataSource(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword())
+				.target("1").load();
+		v1.migrate();
+		var existingUser = UUID.randomUUID();
+		try (var connection = DriverManager.getConnection(
+				postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword());
+			 var statement = connection.prepareStatement(
+					 "INSERT INTO users (id, nickname, data_generation) VALUES (?, 'existing', 7)")) {
+			statement.setObject(1, existingUser);
+			statement.executeUpdate();
+		}
+		try (var context = startApplication(WebApplicationType.NONE)) {
+			var jdbc = context.getBean(JdbcTemplate.class);
+			assertThat(jdbc.queryForMap("SELECT id, nickname, data_generation FROM users"))
+					.containsEntry("id", existingUser).containsEntry("nickname", "existing")
+					.containsEntry("data_generation", 7L);
+			assertThat(jdbc.queryForObject("SELECT checksum FROM flyway_schema_history WHERE version = '1'",
+					Integer.class)).isEqualTo(1980645960);
+			assertThat(jdbc.queryForObject("SELECT count(*) FROM auth_identities", Integer.class)).isZero();
+			assertThat(jdbc.queryForObject("SELECT count(*) FROM exercise_definitions", Integer.class)).isZero();
+			assertThat(jdbc.queryForObject("SELECT count(*) FROM user_workout_settings", Integer.class)).isZero();
 			assertThat(context.getBean(Flyway.class).migrate().migrationsExecuted).isZero();
 		}
 	}

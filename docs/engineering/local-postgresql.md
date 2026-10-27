@@ -1,7 +1,8 @@
 # 로컬 PostgreSQL · Flyway
 
-Task 007-1A의 개발 환경이다. Windows/WSL에 PostgreSQL을 직접 설치하지 않는다.
-운영 서버 연결·배포 설정이 아니며, 인증·계정 API·운동 테이블·운영 seed는 후속 작업이다.
+Task 007의 개발 환경이다. Windows/WSL에 PostgreSQL을 직접 설치하지 않는다.
+007-1B의 내부 계정·개인 종목 seed는 [별도 문서](account-provisioning.md)를 따른다.
+운영 서버 연결·배포 설정이 아니며, 실제 인증·공개 계정 API·운동 기록 기능은 후속 작업이다.
 
 ## 준비 및 충돌 확인
 
@@ -97,13 +98,16 @@ SELECT count(*) FROM users;
 ## 스키마 정책
 
 - Spring Boot 시작 시 Flyway가 `classpath:db/migration`의 버전 SQL을 적용·검증한다.
-- `V1__create_users.sql`만 존재한다. `users.id`는 서버가 공급할 UUID PK이며 DB 자동 UUID 기본값은 없다.
+- `V1__create_users.sql`과 `V2__create_account_provisioning.sql`을 순서대로 적용한다.
+  `users.id`는 서버가 공급할 UUID PK이며 DB 자동 UUID 기본값은 없다.
 - `data_generation BIGINT NOT NULL DEFAULT 0`, `CHECK (data_generation >= 0)`다.
   후속 초기화 트랜잭션에서 서버가 관리하며 클라이언트 쓰기 권한/API는 아직 없다.
 - `nickname TEXT NULL`이며 닉네임 길이·고유성 등 미확정 제품 제약을 추가하지 않았다.
 - `created_at`, `updated_at`은 `TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP`다.
   삽입 시 기본값만 제공하며, 후속 서버 갱신 로직이 `updated_at`을 명시적으로 유지해야 한다.
-- 인증·OTP·Spring Session·운동·동기화 테이블과 seed는 아직 없다.
+- V2는 신원·개인 웨이트 종목·휴식 설정 기반을 추가한다. 마이그레이션/앱 시작은 계정 seed를 생성하지 않는다.
+  검증된 신원에 대한 내부 프로비저닝에서만 개인 seed를 생성한다.
+  OTP·Spring Session·루틴·운동 기록·동기화 테이블은 아직 없다.
 - 스키마 변경 경로는 Flyway 하나다. 기본 SQL 초기화는 비활성화하고,
   Flyway clean은 차단하며 자동 baseline은 사용하지 않는다. JPA/Hibernate는 도입하지 않았다.
 - 적용한 버전 SQL을 수정하지 않는다. 이후 변경은 V2 이상 새 마이그레이션으로 추가한다.
@@ -118,11 +122,12 @@ SELECT count(*) FROM users;
 git diff --check
 ```
 
-- `test`: DB 없이 컨텍스트 로딩·Health MVC 계약을 검증한다. DB 자동설정 제외는 해당
-  컨텍스트 테스트에만 적용하며 실행용 설정에서 DB 오류를 숨기지 않는다.
+- `test`: DB 없이 컨텍스트 배선·Health MVC·신원 입력·운영 초기값을 검증한다. DB 자동설정 제외와
+  JdbcTemplate/트랜잭션 관리자 stub은 컨텍스트 배선 테스트에만 적용하며 실행용 설정에서 DB 오류를 숨기지 않는다.
 - `integrationTest`: `postgres` 태그 테스트만 실행한다. Testcontainers PostgreSQL 18.6으로
   각 테스트의 새 컨테이너·빈 DB·임의 포트·임의 비밀번호를 사용한다. `.env` 개발 DB를 사용하지 않는다.
-  최초 적용, 재시작 후 같은 적용 이력·사용자 보존, 스키마·제약, 실제 HTTP Health 계약을 검증한다.
+  최초 적용·V1 업그레이드·재시작 후 이력/사용자 보존, 스키마·제약·실제 HTTP Health,
+  계정 중복 경쟁·전체 롤백·소유권/세대·운영 seed를 검증한다.
 - `check`와 `build`는 통합 테스트도 포함하므로 Docker가 필요하다.
   Docker가 없으면 통합 테스트는 실패하며 조용히 건너뛰지 않는다.
 - 초기 실행은 Gradle 의존성과 PostgreSQL/Ryuk 이미지 다운로드가 필요하다.

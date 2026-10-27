@@ -1,0 +1,66 @@
+package com.overload.overload_server.account;
+
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.stereotype.Repository;
+
+import java.util.Optional;
+import java.util.UUID;
+
+@Repository
+class AccountRepository {
+
+	private final JdbcTemplate jdbc;
+
+	AccountRepository(JdbcTemplate jdbc) {
+		this.jdbc = jdbc;
+	}
+
+	Optional<Account> findByIdentity(VerifiedIdentity identity) {
+		return jdbc.query("""
+				SELECT u.id, u.data_generation, u.nickname
+				FROM users u JOIN auth_identities a ON a.user_id = u.id
+				WHERE a.provider = ? AND a.issuer = ? AND a.subject = ?
+				FOR UPDATE OF u
+				""", (row, index) -> new Account(row.getObject("id", UUID.class),
+				row.getLong("data_generation"), row.getString("nickname")),
+				identity.provider().databaseValue(), identity.issuer(), identity.subject()).stream().findFirst();
+	}
+
+	Account createUser(String nickname) {
+		var userId = UUID.randomUUID();
+		return jdbc.queryForObject("""
+				INSERT INTO users (id, nickname) VALUES (?, ?)
+				RETURNING id, data_generation, nickname
+				""", (row, index) -> new Account(row.getObject("id", UUID.class),
+				row.getLong("data_generation"), row.getString("nickname")), userId, nickname);
+	}
+
+	boolean claimIdentity(Account account, VerifiedIdentity identity) {
+		return jdbc.update("""
+				INSERT INTO auth_identities (id, user_id, provider, issuer, subject)
+				VALUES (?, ?, ?, ?, ?)
+				ON CONFLICT ON CONSTRAINT auth_identities_credential_unique DO NOTHING
+				""", UUID.randomUUID(), account.id(), identity.provider().databaseValue(),
+				identity.issuer(), identity.subject()) == 1;
+	}
+
+	void insertInitialWorkoutData(Account account) {
+		jdbc.batchUpdate("""
+				INSERT INTO exercise_definitions (id, user_id, data_generation, name) VALUES (?, ?, ?, ?)
+				""", AccountSeed.WEIGHT_EXERCISE_NAMES, AccountSeed.WEIGHT_EXERCISE_NAMES.size(),
+				(statement, name) -> {
+					statement.setObject(1, UUID.randomUUID());
+					statement.setObject(2, account.id());
+					statement.setLong(3, account.dataGeneration());
+					statement.setString(4, name);
+				});
+		var settings = AccountSeed.WORKOUT_SETTINGS;
+		jdbc.update("""
+				INSERT INTO user_workout_settings
+				(user_id, data_generation, rest_low_seconds, rest_medium_seconds, rest_high_seconds)
+				VALUES (?, ?, ?, ?, ?)
+				""", account.id(), account.dataGeneration(), settings.restLowSeconds(),
+				settings.restMediumSeconds(), settings.restHighSeconds());
+	}
+
+}

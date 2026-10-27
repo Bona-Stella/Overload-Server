@@ -28,7 +28,7 @@
 
 `overload-server`는 사용자 계정, 운동 종목, 운동 세션, 세트별 기록, 루틴 및 통계 데이터를 관리하고 클라이언트 앱에 REST API를 제공하는 백엔드 프로젝트입니다.
 
-> 🚧 현재 Health API와 Docker Compose 기반 로컬 PostgreSQL·Flyway 기반이 구현되어 있습니다. 최소 `users` 스키마와 실제 PostgreSQL 통합 테스트가 있으며, 업무 API·인증·운영 seed는 아직 구현되지 않았습니다. 아래 주요 기능과 API는 개발 목표입니다.
+> 🚧 현재 Health API, 로컬 PostgreSQL·Flyway, 내부 계정 프로비저닝과 개인 운동 종목·설정 초기값이 구현되어 있습니다. 실제 인증·로그인·운동 CRUD API·프론트 연동은 아직 구현되지 않았습니다. 아래 주요 기능과 API는 개발 목표입니다.
 
 ---
 
@@ -342,8 +342,11 @@ curl.exe -i -X POST http://localhost:8080/api/v1/health
 초기 실행은 Gradle 배포판·의존성·컨테이너 이미지 다운로드가 필요합니다.
 `--offline`은 Gradle 캐시가 준비된 경우에만 사용합니다.
 
-`test`는 DB 없이 컨텍스트 로딩 1개와 Health MVC 계약 2개를 검증합니다.
-`integrationTest`는 개발 DB와 분리된 일회성 PostgreSQL에서 최초 마이그레이션·재시작 멱등성·스키마와 제약·실제 HTTP Health 계약 3개를 검증합니다.
+`test`는 DB 없이 컨텍스트 배선·Health MVC 계약, 신원 입력 계약과 운영 초기값·휴식 경계를 검증합니다.
+`integrationTest`는 일회성 PostgreSQL에서 V1→V2 마이그레이션·재시작·Health,
+계정 원자적 생성·동시 요청·전체 롤백·소유권/세대 제약을 검증합니다.
+운영 종목 20개와 휴식 구간, 신원/트랜잭션 계약 및 후속 연동 사항은
+[계정 프로비저닝 문서](docs/engineering/account-provisioning.md)를 참고합니다.
 
 ---
 
