@@ -4,6 +4,7 @@
 `AccountProvisioningService.provision(VerifiedIdentity, nickname)`은 계정 생성·재진입을 처리한다.
 Google 토큰/이메일 소유 증명 검증, 로그인·세션·OTP·프론트 연동은 007-1C 범위다.
 공개 계정 생성 HTTP API, 테스트용 HTTP 우회 경로, 앱 시작 시 임의 계정/seed 생성은 없다.
+007-1C-1의 보안·세션 기반과 검증 후 내부 호출 접점은 [보안·세션 문서](security-session.md)를 따른다.
 
 ## 신원 입력 계약
 

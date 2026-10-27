@@ -58,7 +58,7 @@ Task 007의 확정 정책과 구현 단계는 [Task 006 최종 설계 v0.3.1](..
 | Database | PostgreSQL 18.x |
 | Persistence | Spring Data JPA / Hibernate |
 | Validation | Jakarta Validation |
-| Security | Spring Security |
+| Security | Spring Security (007-1C-1 기반 도입, 실제 로그인 미구현) |
 | DB Migration | Flyway (007-1A 도입, Boot BOM 관리) |
 | Testing | JUnit / Spring Boot Test |
 | Integration Testing | Testcontainers PostgreSQL (007-1A 도입, Boot BOM 관리) |
@@ -809,7 +809,8 @@ API 오류 응답에는 RFC 9457 기반
 Spring Security를 인증 및 인가의 기본 도구로 사용합니다.
 
 - MVP 인증은 최종 설계 3절의 Google OIDC + 이메일 OTP(Resend), Spring Session JDBC/PostgreSQL 기반 쿠키 세션을 따릅니다.
-- 이는 확정 설계이며 현재 인증 구현과 Spring Security·Session 의존성 도입은 아직 완료되지 않았습니다.
+- Spring Security·Session JDBC 기반은 007-1C-1에서 도입했으나 실제 Google/OTP 인증은 아직 미구현입니다.
+- 현재 세션·쿠키·CSRF·보안 응답 및 후속 연동 계약은 [보안·세션 문서](security-session.md)를 따릅니다.
 - 보호 대상 Endpoint와 공개 Endpoint를 명확히 구분합니다.
 - 인증되지 않은 접근에 적절한 오류를 반환합니다.
 - CORS는 허용할 Origin을 명시적으로 설정합니다.

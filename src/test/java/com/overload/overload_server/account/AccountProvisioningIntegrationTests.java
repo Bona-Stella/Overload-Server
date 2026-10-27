@@ -76,7 +76,7 @@ class AccountProvisioningIntegrationTests {
 				SELECT table_name FROM information_schema.tables
 				WHERE table_schema = 'public' ORDER BY table_name
 				""", String.class)).containsExactly("auth_identities", "exercise_definitions",
-				"flyway_schema_history", "user_workout_settings", "users");
+				"flyway_schema_history", "spring_session", "spring_session_attributes", "user_workout_settings", "users");
 	}
 
 	@Test

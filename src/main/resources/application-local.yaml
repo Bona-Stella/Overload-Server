@@ -5,3 +5,7 @@ spring:
     url: jdbc:postgresql://127.0.0.1:${POSTGRES_PORT:5433}/${POSTGRES_DB:overload_dev}
     username: ${POSTGRES_USER:overload_dev}
     password: ${POSTGRES_PASSWORD}
+overload:
+  session:
+    cookie:
+      secure: false

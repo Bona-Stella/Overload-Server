@@ -28,7 +28,7 @@
 
 `overload-server`는 사용자 계정, 운동 종목, 운동 세션, 세트별 기록, 루틴 및 통계 데이터를 관리하고 클라이언트 앱에 REST API를 제공하는 백엔드 프로젝트입니다.
 
-> 🚧 현재 Health API, 로컬 PostgreSQL·Flyway, 내부 계정 프로비저닝과 개인 운동 종목·설정 초기값이 구현되어 있습니다. 실제 인증·로그인·운동 CRUD API·프론트 연동은 아직 구현되지 않았습니다. 아래 주요 기능과 API는 개발 목표입니다.
+> 🚧 현재 Health API, 로컬 PostgreSQL·Flyway, 내부 계정 프로비저닝·운영 seed, Spring Security·JDBC 세션·CSRF 기반이 구현되어 있습니다. Google/OTP 실제 인증·로그인 API·운동 CRUD·프론트 연동은 아직 구현되지 않았습니다. 아래 주요 기능과 API는 개발 목표입니다.
 
 ---
 
@@ -106,8 +106,8 @@ Java 및 Spring Boot 기반의 REST API 서버를 개발합니다.
 | Framework Core | Spring Framework | 7.x |
 | Build Tool | Gradle | 9.8.2 |
 | ORM | Spring Data JPA / Hibernate | 미도입 (후속 도메인 단계에서 검토) |
-| Security | Spring Security | 도입 예정 |
-| Authentication | Google OIDC + 이메일 OTP(Resend) / Spring Session JDBC 쿠키 세션 | Task 006 설계 확정·미구현 |
+| Security | Spring Security | 7.1.2 기반 구성 (실제 로그인 미구현) |
+| Authentication | Google OIDC + 이메일 OTP(Resend) / Spring Session JDBC 쿠키 세션 | Session 4.1.1 기반 도입, Google/OTP 검증·연동 미구현 |
 | Validation | Jakarta Validation | Starter 구성 완료 |
 
 ### Database & Infrastructure
@@ -345,6 +345,8 @@ curl.exe -i -X POST http://localhost:8080/api/v1/health
 `test`는 DB 없이 컨텍스트 배선·Health MVC 계약, 신원 입력 계약과 운영 초기값·휴식 경계를 검증합니다.
 `integrationTest`는 일회성 PostgreSQL에서 V1→V2 마이그레이션·재시작·Health,
 계정 원자적 생성·동시 요청·전체 롤백·소유권/세대 제약을 검증합니다.
+V3 세션 테이블·실제 HTTP/HTTPS 쿠키·CSRF·90일 절대 만료·10분 재인증 경계도 검증합니다.
+보안 응답과 프론트의 토큰 조회·갱신 계약은 [보안·세션 문서](docs/engineering/security-session.md)를 참고합니다.
 운영 종목 20개와 휴식 구간, 신원/트랜잭션 계약 및 후속 연동 사항은
 [계정 프로비저닝 문서](docs/engineering/account-provisioning.md)를 참고합니다.
 
