@@ -23,7 +23,7 @@ final class AbsoluteExpiryCookieSerializer extends DefaultCookieSerializer {
 			// The outer SessionRepositoryFilter may still commit the old request snapshot. Never restore its cookie.
 			var rotation = marker.rotation();
 			try {
-				marker.owner().verifyStored(rotation);
+				marker.verify();
 				var rotated = new CookieValue(value.getRequest(), value.getResponse(), rotation.sessionId());
 				rotated.setCookieMaxAge(policy.remainingSeconds(rotation.metadata()));
 				super.writeCookieValue(rotated);

@@ -58,10 +58,10 @@ final class EmailOtpRepository {
 				""", context.emailKey(), context.purpose().name());
 		jdbc.update("""
 				INSERT INTO email_otp_challenges
-				(id, email_key, purpose, recipient, binding_hash, verifier, state, issued_at, expires_at, reauth_user_id, reauth_identity_id)
-				VALUES (?, ?, ?, ?, ?, ?, 'PENDING', ?, ?, ?, ?)
+				(id, email_key, purpose, recipient, binding_hash, verifier, state, issued_at, expires_at, reauth_user_id, reauth_identity_id, reauth_contact_id)
+				VALUES (?, ?, ?, ?, ?, ?, 'PENDING', ?, ?, ?, ?, ?)
 				""", id, context.emailKey(), context.purpose().name(), context.email(), context.bindingHash(), verifier,
-				Timestamp.from(now), Timestamp.from(now.plusSeconds(300)), context.userId(), context.identityId());
+				Timestamp.from(now), Timestamp.from(now.plusSeconds(300)), context.userId(), context.identityId(), context.contactId());
 		jdbc.update("""
 				UPDATE email_otp_limits SET active_challenge_id = ?, last_issued_at = ? WHERE email_key = ? AND purpose = ?
 				""", id, Timestamp.from(now), context.emailKey(), context.purpose().name());
@@ -82,10 +82,10 @@ final class EmailOtpRepository {
 
 	Optional<Challenge> challenge(UUID id, OtpChallenges.Context context) {
 		return jdbc.query("""
-				SELECT state, expires_at, binding_hash, verifier, failed_attempts, reauth_user_id, reauth_identity_id
+				SELECT state, expires_at, binding_hash, verifier, failed_attempts, reauth_user_id, reauth_identity_id, reauth_contact_id
 				FROM email_otp_challenges WHERE id = ? AND email_key = ? AND purpose = ?
 				""", (row, index) -> new Challenge(row.getString(1), row.getTimestamp(2).toInstant(), row.getString(3),
-				row.getBytes(4), row.getInt(5), row.getObject(6, UUID.class), row.getObject(7, UUID.class)),
+				row.getBytes(4), row.getInt(5), row.getObject(6, UUID.class), row.getObject(7, UUID.class), row.getObject(8, UUID.class)),
 				id, context.emailKey(), context.purpose().name()).stream().findFirst();
 	}
 
@@ -115,7 +115,7 @@ final class EmailOtpRepository {
 	void releaseBrowser(UUID id) { jdbc.update("DELETE FROM email_otp_login_claims WHERE challenge_id = ?", id); }
 	static long secondsUntil(Instant now, Instant until) { return Math.max(1, (Duration.between(now, until).toMillis() + 999) / 1000); }
 	record Guard(UUID activeId, Instant lastIssuedAt, int failures, Instant failureWindowEnd) { }
-	record Challenge(String state, Instant expiresAt, String bindingHash, byte[] verifier, int failures, UUID userId, UUID identityId) {
+	record Challenge(String state, Instant expiresAt, String bindingHash, byte[] verifier, int failures, UUID userId, UUID identityId, UUID contactId) {
 		@Override public String toString() { return "Challenge[redacted]"; }
 	}
 }

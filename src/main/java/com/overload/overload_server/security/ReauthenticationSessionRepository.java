@@ -38,9 +38,14 @@ public class ReauthenticationSessionRepository {
 	}
 
 	public SessionReauthentication.Rotation rotate(SessionReauthentication.Snapshot expected) {
+		return rotate(expected, policy.now());
+	}
+
+	public SessionReauthentication.Rotation rotate(SessionReauthentication.Snapshot expected, java.time.Instant authenticatedAt) {
 		var stored = locked(expected);
 		var metadata = new SessionMetadata(expected.userId(), expected.metadata().loginStartedAt(),
-				expected.metadata().absoluteExpiresAt(), policy.now());
+				expected.metadata().absoluteExpiresAt(), authenticatedAt);
+		if (!policy.isActive(metadata)) { throw new SessionReauthentication.SessionChanged(); }
 		var primary = UUID.randomUUID().toString();
 		var id = UUID.randomUUID().toString();
 		long accessed = System.currentTimeMillis();

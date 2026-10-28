@@ -53,6 +53,7 @@ public class GoogleOidcFixtures {
 
 	public static MockProvider provider;
 	public static volatile boolean corruptMetadataRead;
+	public static volatile java.util.function.Consumer<Session> onSessionRead;
 
 	@Bean
 	@Primary
@@ -76,6 +77,7 @@ public class GoogleOidcFixtures {
 				var wrapped = spy(repository);
 				doAnswer(invocation -> {
 					Session stored = (Session) invocation.callRealMethod();
+					var hook = onSessionRead; if (hook != null && stored != null) { hook.accept(stored); }
 					if (corruptMetadataRead && stored != null && stored.getAttribute("SPRING_SECURITY_CONTEXT") != null) {
 						var damaged = spy(stored);
 						var metadata = (SessionMetadata) stored.getAttribute(SessionMetadata.ATTRIBUTE);
@@ -114,6 +116,8 @@ public class GoogleOidcFixtures {
 		public volatile String email = "same-address@example.test";
 		public volatile Fault fault = Fault.NONE;
 		public volatile Runnable onExchange;
+		public volatile Object authenticationTime;
+		public volatile Object emailVerified=Boolean.TRUE;
 
 		public MockProvider() throws Exception {
 			signing = new RSAKeyGenerator(2048).keyID(UUID.randomUUID().toString()).generate();
@@ -133,7 +137,7 @@ public class GoogleOidcFixtures {
 
 		public void reset() {
 			codes.clear(); secrets.clear(); exchanges.set(0); authorizations.set(0);
-			subject = "google-sub-one"; email = "same-address@example.test"; fault = Fault.NONE; onExchange = null;
+			subject = "google-sub-one"; email = "same-address@example.test"; fault = Fault.NONE; onExchange = null; authenticationTime = null; emailVerified=Boolean.TRUE;
 		}
 
 		private void authorize(HttpExchange exchange) throws IOException {
@@ -145,7 +149,7 @@ public class GoogleOidcFixtures {
 			}
 			authorizations.incrementAndGet();
 			String code = UUID.randomUUID().toString();
-			codes.put(code, new Ticket(query.get("redirect_uri"), query.get("nonce"), query.get("code_challenge"), subject, email, fault));
+			codes.put(code, new Ticket(query.get("redirect_uri"), query.get("nonce"), query.get("code_challenge"), subject, email, fault, authenticationTime, emailVerified));
 			var callback = query.get("redirect_uri") + "?code=" + encode(code) + "&state=" + encode(query.get("state"));
 			exchange.getResponseHeaders().set("Location", callback);
 			exchange.sendResponseHeaders(302, -1); exchange.close();
@@ -172,7 +176,8 @@ public class GoogleOidcFixtures {
 				var now = Instant.now();
 				var claims = new JWTClaimsSet.Builder().issuer("https://accounts.google.com").subject(ticket.subject)
 						.audience(clientId).issueTime(Date.from(now)).expirationTime(Date.from(now.plusSeconds(300)))
-						.claim("nonce", ticket.nonce).claim("email", ticket.email).claim("email_verified", true);
+						.claim("nonce", ticket.nonce).claim("email", ticket.email).claim("email_verified", ticket.emailVerified);
+				if (ticket.authenticationTime != null) { claims.claim("auth_time", ticket.authenticationTime); }
 				switch (ticket.fault) {
 					case WRONG_ISSUER -> claims.issuer("https://untrusted.example.test");
 					case WRONG_AUDIENCE -> claims.audience("other-client");
@@ -229,7 +234,7 @@ public class GoogleOidcFixtures {
 			catch (Exception exception) { return "invalid"; }
 		}
 		@Override public void close() { server.stop(0); executor.shutdownNow(); }
-		private record Ticket(String redirect, String nonce, String challenge, String subject, String email, Fault fault) {
+		private record Ticket(String redirect, String nonce, String challenge, String subject, String email, Fault fault, Object authenticationTime, Object emailVerified) {
 			@Override public String toString() { return "MockOidcTicket[redacted]"; }
 		}
 	}

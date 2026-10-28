@@ -14,6 +14,11 @@ public class AccountIdentityService {
 
 	public List<Summary> list(UUID owner) { return repository.list(owner); }
 	public Optional<EmailIdentity> email(UUID owner, UUID identity, boolean lock) { return repository.email(owner, identity, lock); }
+	public Optional<GoogleIdentity> google(UUID owner, UUID identity, boolean lock) { return repository.google(owner, identity, lock); }
+
+	public record GoogleIdentity(UUID id, String issuer, String subject) {
+		@Override public String toString() { return "GoogleIdentity[redacted]"; }
+	}
 
 	public record Summary(UUID id, String provider) {
 		@Override public String toString() { return "IdentitySummary[redacted]"; }

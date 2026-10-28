@@ -53,7 +53,7 @@ final class OtpCrypto {
 			mac.init(new SecretKeySpec(key, "HmacSHA256"));
 			var fields = new java.util.ArrayList<>(java.util.List.of("overload-otp-v1", purpose.name(), email, issuance.toString(), code));
 			// Preserve the exact V4 LOGIN HMAC format; REAUTH additionally authenticates the session/owner binding.
-			if (purpose == OtpPurpose.REAUTH) { fields.add(java.util.Objects.requireNonNull(bindingHash)); }
+			if (purpose != OtpPurpose.LOGIN) { fields.add(java.util.Objects.requireNonNull(bindingHash)); }
 			for (var field : fields) {
 				var bytes = field.getBytes(StandardCharsets.UTF_8);
 				mac.update(ByteBuffer.allocate(4).putInt(bytes.length).array());

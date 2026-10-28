@@ -40,13 +40,19 @@ public class SessionReauthentication {
 
 	public void validate(Snapshot expected) { repository.validate(expected); }
 	public Rotation rotate(Snapshot expected) { return repository.rotate(expected); }
+	public Rotation rotate(Snapshot expected, java.time.Instant authenticatedAt) { return repository.rotate(expected, authenticatedAt); }
 	public void validateRotation(Rotation rotation) { repository.validateRotation(rotation); }
 
 	public void complete(HttpServletRequest request, HttpServletResponse response, Rotation rotation) {
+		complete(request, response, rotation, () -> { });
+	}
+
+	public void complete(HttpServletRequest request, HttpServletResponse response, Rotation rotation, Runnable validateEvidence) {
 		try {
 			if (!capture(request, rotation.original().userId()).equals(rotation.original())) { throw new SessionChanged(); }
+			validateEvidence.run();
 			verifyStored(rotation);
-			request.setAttribute(COOKIE, new ReauthenticationCookie(rotation, this));
+			request.setAttribute(COOKIE, new ReauthenticationCookie(rotation, this, validateEvidence));
 			cookies.writeCookieValue(new CookieSerializer.CookieValue(request, response, rotation.sessionId()));
 		} catch (RuntimeException failure) {
 			discard(rotation);
@@ -70,19 +76,21 @@ public class SessionReauthentication {
 		catch (RuntimeException unavailable) { /* Fail closed; never report a successful store. */ }
 	}
 
-	void finishResponse(HttpServletRequest request, HttpServletResponse response, Rotation rotation) {
-		if (response.getStatus() < 200 || response.getStatus() >= 300) { return; }
-		try { verifyStored(rotation); }
+	void finishResponse(HttpServletRequest request, HttpServletResponse response, ReauthenticationCookie marker) {
+		if (response.getStatus() < 200 || response.getStatus() >= 400) { return; }
+		var rotation = marker.rotation();
+		try { marker.verify(); }
 		catch (RuntimeException failure) {
 			discard(rotation);
 			response.setStatus(failure instanceof SessionChanged ? 401 : 503);
+			response.setHeader("Location", null);
 			var expired = new CookieSerializer.CookieValue(request, response, "");
 			expired.setCookieMaxAge(0);
 			cookies.writeCookieValue(expired);
 		}
 	}
 
-	public record Snapshot(String sessionId, UUID userId, SessionMetadata metadata) {
+	public record Snapshot(String sessionId, UUID userId, SessionMetadata metadata) implements java.io.Serializable {
 		@Override public String toString() { return "ReauthenticationSnapshot[redacted]"; }
 	}
 	public record Rotation(Snapshot original, String sessionId, SessionMetadata metadata) {
@@ -91,7 +99,8 @@ public class SessionReauthentication {
 	public static class SessionChanged extends RuntimeException {
 		public SessionChanged() { super("Authentication session changed"); }
 	}
-	record ReauthenticationCookie(Rotation rotation, SessionReauthentication owner) {
+	record ReauthenticationCookie(Rotation rotation, SessionReauthentication owner, Runnable validateEvidence) {
+		void verify() { validateEvidence.run(); owner.verifyStored(rotation); validateEvidence.run(); }
 		@Override public String toString() { return "ReauthenticationCookie[redacted]"; }
 	}
 }

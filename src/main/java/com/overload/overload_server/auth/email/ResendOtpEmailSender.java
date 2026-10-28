@@ -43,14 +43,15 @@ final class ResendOtpEmailSender implements OtpEmailSender {
 			throw new OtpFailure(503, "OTP_UNAVAILABLE");
 		}
 		boolean reauth = message.purpose() == OtpPurpose.REAUTH;
+		boolean enrollment = message.purpose() == OtpPurpose.CONTACT_ENROLL;
 		var body = JSON.createObjectNode().put("from", from)
-				.put("subject", reauth ? "Overload 이메일 재인증 코드" : "Overload 로그인 인증 코드")
+				.put("subject", enrollment ? "Overload 재인증 이메일 등록 코드" : reauth ? "Overload 이메일 재인증 코드" : "Overload 로그인 인증 코드")
 				.put("text", (reauth ? "이메일 재인증 코드: " : "인증 코드: ") + message.code()
 						+ "\n5분 안에 입력하세요. 요청하지 않았다면 무시하세요.");
 		body.putArray("to").add(message.recipient());
 		var request = HttpRequest.newBuilder(endpoint).timeout(timeout)
 				.header("Authorization", "Bearer " + apiKey).header("Content-Type", "application/json")
-				.header("Idempotency-Key", (reauth ? "email-otp/reauth/" : "email-otp/") + message.issuanceId())
+				.header("Idempotency-Key", (enrollment ? "email-otp/contact-enroll/" : reauth ? "email-otp/reauth/" : "email-otp/") + message.issuanceId())
 				.POST(HttpRequest.BodyPublishers.ofString(JSON.writeValueAsString(body))).build();
 		try {
 			var response = client.send(request, HttpResponse.BodyHandlers.ofString());

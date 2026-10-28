@@ -30,12 +30,15 @@ final class OtpChallenges {
 	}
 
 	UUID request(Context context, String remoteIp, Runnable validateContext) {
+		return request(context,remoteIp,validateContext,now->{ });
+	}
+	UUID request(Context context,String remoteIp,Runnable validateContext,java.util.function.Consumer<Instant> reserved) {
 		requireNoTransaction();
 		if (!crypto.ready() || !sender.ready()) { throw new OtpFailure(503, "OTP_UNAVAILABLE"); }
 		var reservation = transaction.execute(status -> {
 			var now = now();
 			long ip = repository.rate(context.purpose(), "request-ip", remoteIp, 20, Duration.ofHours(1), now);
-			long email = repository.rate(context.purpose(), "request-email", context.email(), 5, Duration.ofHours(1), now);
+			long email = repository.rate(context.purpose(), "request-email", context.rateRecipient(), 5, Duration.ofHours(1), now);
 			var guard = repository.lock(context.purpose(), context.emailKey(), now);
 			validateContext.run();
 			long retry = Math.max(ip, email);
@@ -46,6 +49,7 @@ final class OtpChallenges {
 			if (retry > 0) { return new Reservation(null, retry); }
 			var id = UUID.randomUUID(); var code = crypto.newCode();
 			repository.reserve(id, context, crypto.verifier(context.purpose(), context.email(), id, code, context.bindingHash()), now);
+			reserved.accept(now);
 			return new Reservation(new OtpEmailSender.Message(id, context.email(), code, context.purpose()), 0);
 		});
 		if (reservation.retryAfter() > 0) { throw new OtpFailure(429, "OTP_RATE_LIMITED", reservation.retryAfter()); }
@@ -69,7 +73,7 @@ final class OtpChallenges {
 		var result = transaction.execute(status -> {
 			var now = now();
 			long ip = repository.rate(context.purpose(), "verify-ip", remoteIp, 100, Duration.ofMinutes(15), now);
-			long email = repository.rate(context.purpose(), "verify-email", context.email(), 20, Duration.ofMinutes(15), now);
+			long email = repository.rate(context.purpose(), "verify-email", context.rateRecipient(), 20, Duration.ofMinutes(15), now);
 			var guard = repository.lock(context.purpose(), context.emailKey(), now); validateContext.run();
 			var challenge = repository.challenge(id, context);
 			boolean matches = MessageDigest.isEqual(crypto.verifier(context.purpose(), context.email(), id, code, context.bindingHash()),
@@ -83,7 +87,8 @@ final class OtpChallenges {
 			boolean valid = matches && id.equals(guard.activeId()) && challenge.isPresent()
 					&& "ACTIVE".equals(challenge.get().state()) && challenge.get().failures() < 5
 					&& now.isBefore(challenge.get().expiresAt()) && challenge.get().bindingHash().equals(context.bindingHash())
-					&& Objects.equals(challenge.get().userId(), context.userId()) && Objects.equals(challenge.get().identityId(), context.identityId());
+					&& Objects.equals(challenge.get().userId(), context.userId()) && Objects.equals(challenge.get().identityId(), context.identityId())
+					&& Objects.equals(challenge.get().contactId(), context.contactId());
 			if (!valid) { repository.failedAttempt(context, id); return new Outcome<T>(null, 0, false); }
 			if (context.purpose() == OtpPurpose.LOGIN && !repository.claimBrowser(context.bindingHash(), id, now)) {
 				return new Outcome<T>(null, 0, false);
@@ -101,8 +106,10 @@ final class OtpChallenges {
 	private static void requireNoTransaction() {
 		if (TransactionSynchronizationManager.isActualTransactionActive()) { throw new IllegalStateException("OTP orchestration must run outside database transactions"); }
 	}
-	record Context(OtpPurpose purpose, String email, String bindingHash, UUID userId, UUID identityId) {
-		String emailKey() { return OtpCrypto.identifier("email", email); }
+	record Context(OtpPurpose purpose, String email, String bindingHash, UUID userId, UUID identityId, UUID contactId) {
+		Context(OtpPurpose purpose, String email, String bindingHash, UUID userId, UUID identityId) { this(purpose,email,bindingHash,userId,identityId,null); }
+		String rateRecipient() { return purpose == OtpPurpose.LOGIN ? email : userId + "\n" + email; }
+		String emailKey() { return OtpCrypto.identifier("email", rateRecipient()); }
 		@Override public String toString() { return "OtpContext[redacted]"; }
 	}
 	private record Reservation(OtpEmailSender.Message message, long retryAfter) { }

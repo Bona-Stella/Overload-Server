@@ -25,4 +25,12 @@ class AccountIdentityRepository {
 				(row, index) -> new AccountIdentityService.EmailIdentity(row.getObject(1, UUID.class), row.getString(2)),
 				owner, identity).stream().findFirst();
 	}
+
+	Optional<AccountIdentityService.GoogleIdentity> google(UUID owner, UUID identity, boolean lock) {
+		return jdbc.query("""
+				SELECT id, issuer, subject FROM auth_identities
+				WHERE user_id = ? AND id = ? AND provider = 'google' AND issuer = 'https://accounts.google.com'
+				""" + (lock ? " FOR SHARE" : ""), (row, index) -> new AccountIdentityService.GoogleIdentity(
+				row.getObject(1, UUID.class), row.getString(2), row.getString(3)), owner, identity).stream().findFirst();
+	}
 }

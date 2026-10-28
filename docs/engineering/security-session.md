@@ -6,6 +6,11 @@
 인증 성공이 아니다. 후속 검증 코드가 계정 프로비저닝을 완료한 뒤 검증된 계정 UUID만
 `AuthenticationSessionService.establishAfterVerification`에 전달해야 한다.
 Google/이메일 자동 병합 금지와 기존 seed 정책은 [계정 계약](account-provisioning.md)을 유지한다.
+Google 최근 재인증은 [007-1C-3B-2](google-reauthentication.md)에서 검증된 auth_time을 요구하며
+같은 JDBC 교체/CSRF/최종 응답 검증을 사용하며 독립 `GOOGLE_REAUTH_ENABLED` 기본값은 false다.
+모든 계정의 [공통 대표 이메일 OTP](reauthentication-email.md)는 기존 회전 경계를 재사용한다.
+Google 신원 확인 OIDC만으로 최근 시각을 갱신하지 않으며, 최초 연락처 OTP 소유권 증명 성공 시에만
+등록과 회전을 함께 수행한다. 원래 userId/최초 로그인+90일/최근 10분 정책은 유지한다.
 
 ## HTTP 보안 계약
 

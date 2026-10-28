@@ -109,8 +109,15 @@ Google access/ID/refresh token·OidcUser·OAuth2AuthenticationToken은 장기 �
 소비된 state/code를 재활성화하거나 계정/세션/외부 Google 교환을 하나의 트랜잭션이라고 취급하지 않는다.
 
 기존 최초 로그인 +90일 절대 만료·10분 재인증·쿠키 HttpOnly/SameSite/Secure·로그아웃/CSRF 갱신을 유지한다.
-이번 Google 로그인은 인증 수단 연결·재인증 API가 아니다. 이메일 재인증은
-[007-1C-3B-1](email-reauthentication.md)로 추가했고, Google 재인증 및 수단 연결·해제는 후속 범위다.
+이번 일반 Google 로그인은 인증 수단 연결·재인증 API가 아니다. 이메일 재인증은
+[007-1C-3B-1](email-reauthentication.md), 별도 Google 최근 재인증은
+[007-1C-3B-2](google-reauthentication.md)는 독립 `GOOGLE_REAUTH_ENABLED=false`로 기본 비활성이다.
+일반 LOGIN에는 이 플래그를 요구하지 않는다. Google 재인증의 개발 클라이언트 auth_time 제공 여부는 LIVE 전까지 미확인이다.
+Google-only의 [대표 이메일 최초 등록](reauthentication-email.md)은 별도 `/oauth2/contact/google` POST와
+`/login/oauth2/code/google-contact` 콜백으로 기존 issuer/sub 및 서명된 verified email 후보만 확인한다.
+추가 OTP까지 검증해야 등록/최근 이메일 재인증을 인정하며, Google 비밀번호 재인증이라고 주장하지 않는다.
+일반 LOGIN 성공은 대표 연락처를 자동 등록하거나 기존 연락처를 Google 이메일로 덮어쓰지 않는다.
+수단 연결·해제는 후속 범위다.
 
 ## 검증·실로그인 구분
 
@@ -124,7 +131,8 @@ PostgreSQL은 독립 Testcontainers 18.6이며 기존 Compose DB·실메일·개
 최종 개수·실패 수정·Git/정리 증거는 [검증 보고서](../tasks/task-007-1c-3a-validation-report.md)를 따른다.
 
 기존 PC 브라우저 로그인은 3A-LIVE 결과와 구분하며 이번 자동화 결과로 실로그인을 새로 검증했다고 주장하지 않는다.
-프론트 전환·iPhone/LAN HTTPS·운영 배포·계정 연결/해제·Google 재인증·민감 업무 쓰기는 아직 구현하지 않았다.
+프론트 전환·iPhone/LAN HTTPS·운영 배포·계정 연결/해제·민감 업무 쓰기는 아직 구현하지 않았다.
+Google 재인증은 테스트 OIDC/PostgreSQL 검증과 실제 Google 재인증 검증을 구분한다.
 
 공식 근거:
 

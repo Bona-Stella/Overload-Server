@@ -31,6 +31,11 @@ public class EmailOtpConfiguration {
 	}
 
 	@Bean
+	ReauthenticationEmails reauthenticationEmails(JdbcTemplate jdbc, PlatformTransactionManager manager, Clock clock) {
+		return new ReauthenticationEmails(jdbc,manager,clock);
+	}
+
+	@Bean
 	EmailOtpService emailOtpService(JdbcTemplate jdbc, PlatformTransactionManager manager,
 			@Value("${OTP_HMAC_KEY:}") String key, OtpEmailSender sender,
 			AccountProvisioningService accounts, Clock clock) {

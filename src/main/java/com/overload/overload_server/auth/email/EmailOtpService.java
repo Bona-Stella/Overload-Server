@@ -12,10 +12,12 @@ import java.util.UUID;
 public class EmailOtpService {
 	private final OtpChallenges challenges;
 	private final AccountProvisioningService accounts;
+	private final ReauthenticationEmails contacts;
 
 	EmailOtpService(JdbcTemplate jdbc, PlatformTransactionManager manager, OtpCrypto crypto, OtpEmailSender sender,
 			AccountProvisioningService accounts, Clock clock) {
 		this.challenges = new OtpChallenges(jdbc, manager, crypto, sender, clock); this.accounts = accounts;
+		this.contacts = new ReauthenticationEmails(jdbc, manager, clock);
 	}
 
 	public UUID request(String inputEmail, String remoteIp, String browserNonce) {
@@ -24,8 +26,12 @@ public class EmailOtpService {
 
 	public Account verify(String inputEmail, UUID issuanceId, String code, String remoteIp, String browserNonce) {
 		var context = login(inputEmail, browserNonce);
-		challenges.consume(context, issuanceId, code, remoteIp, () -> { }, now -> Boolean.TRUE);
-		try { return accounts.provision(VerifiedIdentity.email(context.email()), null); }
+		var provedAt=challenges.consume(context, issuanceId, code, remoteIp, () -> { }, now -> now);
+		try {
+			var account=accounts.provision(VerifiedIdentity.email(context.email()), null);
+			contacts.verifiedEmailLogin(account.id(),context.email(),provedAt);
+			return account;
+		}
 		catch (RuntimeException exception) { challenges.releaseLogin(issuanceId); throw exception; }
 	}
 

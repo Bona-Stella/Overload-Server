@@ -60,15 +60,19 @@ public class GoogleOidcSecurity {
 	private final AccountProvisioningService accounts;
 	private final VerifiedSessionLogin sessions;
 	private final HttpClient tokenHttpClient;
+	private final org.springframework.beans.factory.ObjectProvider<GoogleReauthenticationSecurity> reauthentication;
+	private final GoogleContactSecurity contact;
 
 	public GoogleOidcSecurity(ClientRegistrationRepository clients, JdbcTemplate jdbc, PlatformTransactionManager manager,
 			SessionRepository<? extends Session> repository, AccountProvisioningService accounts, VerifiedSessionLogin sessions,
-			@Qualifier("googleTokenHttpClient") HttpClient tokenHttpClient) {
+			@Qualifier("googleTokenHttpClient") HttpClient tokenHttpClient, org.springframework.beans.factory.ObjectProvider<GoogleReauthenticationSecurity> reauthentication, GoogleContactSecurity contact) {
 		this.clients = clients;
 		this.pending = new JdbcAuthorizationRequestRepository(jdbc, manager, repository);
 		this.accounts = accounts;
 		this.sessions = sessions;
 		this.tokenHttpClient = tokenHttpClient;
+		this.reauthentication = reauthentication;
+		this.contact=contact;
 	}
 
 	public void configure(HttpSecurity http) throws Exception {
@@ -147,6 +151,9 @@ public class GoogleOidcSecurity {
 					}
 				}));
 		http.addFilterBefore(new BrowserBoundary(), OAuth2AuthorizationRequestRedirectFilter.class);
+		var experimental=reauthentication.getIfAvailable();
+		if(experimental!=null){experimental.configure(http,tokenClient,users);}
+		contact.configure(http,tokenClient,users);
 	}
 
 	private static boolean exactGet(HttpServletRequest request, String path) {

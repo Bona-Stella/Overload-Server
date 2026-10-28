@@ -20,7 +20,7 @@ final class ReauthenticationResponseFilter extends OncePerRequestFilter {
 				if (!checked && request.getAttribute(SessionReauthentication.COOKIE)
 						instanceof SessionReauthentication.ReauthenticationCookie marker) {
 					checked = true;
-					marker.owner().finishResponse(request, this, marker.rotation());
+					marker.owner().finishResponse(request, this, marker);
 				}
 			}
 		};

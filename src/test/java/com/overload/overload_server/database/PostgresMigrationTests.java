@@ -58,14 +58,14 @@ class PostgresMigrationTests {
 					WHERE table_schema = 'public' ORDER BY table_name
 					""", String.class)).containsExactly("auth_identities", "email_otp_challenges", "email_otp_limits",
 					"email_otp_login_claims", "email_otp_rate_limits", "exercise_definitions",
-					"flyway_schema_history", "spring_session", "spring_session_attributes", "user_workout_settings", "users");
+					"flyway_schema_history", "reauth_email_candidates", "spring_session", "spring_session_attributes", "user_reauthentication_emails", "user_workout_settings", "users");
 			assertThat(jdbc.queryForObject("SELECT count(*) FROM users", Integer.class)).isZero();
-			assertThat(flyway.info().current().getVersion().toString()).isEqualTo("5");
+			assertThat(flyway.info().current().getVersion().toString()).isEqualTo("6");
 			assertThat(flyway.getConfiguration().isCleanDisabled()).isTrue();
 			assertThat(flyway.getConfiguration().isBaselineOnMigrate()).isFalse();
 			flyway.validate();
 			history = jdbc.queryForList("SELECT * FROM flyway_schema_history ORDER BY installed_rank");
-			assertThat(history).hasSize(5);
+			assertThat(history).hasSize(6);
 			assertThat(history.getFirst()).containsEntry("version", "1")
 					.containsEntry("script", "V1__create_users.sql").containsEntry("success", true);
 			assertThat(history.get(1)).containsEntry("version", "2")
@@ -76,6 +76,7 @@ class PostgresMigrationTests {
 					.containsEntry("script", "V4__create_email_otp.sql").containsEntry("success", true);
 			assertThat(history.get(4)).containsEntry("version", "5")
 					.containsEntry("script", "V5__add_email_reauthentication.sql").containsEntry("success", true);
+			assertThat(history.get(5)).containsEntry("version","6").containsEntry("script","V6__add_reauthentication_emails.sql").containsEntry("success",true);
 			jdbc.update("INSERT INTO users (id) VALUES (?)", userId);
 			var user = jdbc.queryForMap("SELECT * FROM users WHERE id = ?", userId);
 			assertThat(user).containsEntry("id", userId).containsEntry("data_generation", 0L)
@@ -130,7 +131,7 @@ class PostgresMigrationTests {
 		var checksums = java.util.Arrays.stream(v2.info().applied()).map(info -> info.getChecksum()).toList();
 		try (var context = startApplication(WebApplicationType.NONE)) {
 			var latest = context.getBean(Flyway.class);
-			assertThat(latest.info().current().getVersion().toString()).isEqualTo("5");
+			assertThat(latest.info().current().getVersion().toString()).isEqualTo("6");
 			assertThat(java.util.Arrays.stream(latest.info().applied()).limit(2).map(info -> info.getChecksum()).toList())
 					.isEqualTo(checksums);
 			assertThat(latest.migrate().migrationsExecuted).isZero();
@@ -195,6 +196,63 @@ class PostgresMigrationTests {
 			assertThatThrownBy(() -> jdbc.update("UPDATE email_otp_challenges SET purpose='REAUTH' WHERE id=?", challenge))
 					.isInstanceOf(DataIntegrityViolationException.class);
 		}
+	}
+
+	@Test
+	void upgradesV5BackfillingOnlyUnambiguousRetainedOtpProofWithoutChangingPriorData() throws Exception {
+		var old=Flyway.configure().dataSource(postgres.getJdbcUrl(),postgres.getUsername(),postgres.getPassword()).target("5").load();old.migrate();
+		var checksums=java.util.Arrays.stream(old.info().applied()).map(info->info.getChecksum()).toList();
+		var jdbc=new JdbcTemplate(new org.springframework.jdbc.datasource.DriverManagerDataSource(postgres.getJdbcUrl(),postgres.getUsername(),postgres.getPassword()));
+		var proven=UUID.randomUUID();var bare=UUID.randomUUID();var google=UUID.randomUUID();var ambiguous=UUID.randomUUID();
+		for(var user:List.of(proven,bare,google,ambiguous)){jdbc.update("INSERT INTO users(id,nickname,data_generation) VALUES (?,'preserved',7)",user);}
+		var provenId=legacyIdentity(jdbc,proven,"proof@example.test");legacyIdentity(jdbc,bare,"unproven@example.test");
+		jdbc.update("INSERT INTO auth_identities(id,user_id,provider,issuer,subject) VALUES (?,?,'google','https://accounts.google.com','legacy-google-sub')",UUID.randomUUID(),google);
+		var one=legacyIdentity(jdbc,ambiguous,"first@example.test");var two=legacyIdentity(jdbc,ambiguous,"second@example.test");
+		legacyProof(jdbc,proven,provenId,"proof@example.test","LOGIN");legacyProof(jdbc,proven,provenId,"proof@example.test","REAUTH");
+		legacyProof(jdbc,ambiguous,one,"first@example.test","LOGIN");legacyProof(jdbc,ambiguous,two,"second@example.test","LOGIN");
+		var oldKey=legacyHash("email","proof@example.test");
+		var newKey=legacyHash("email",proven+"\nproof@example.test");
+		jdbc.update("INSERT INTO email_otp_limits(email_key,purpose,last_issued_at,failed_attempts,failure_window_end) VALUES (?,'REAUTH',CURRENT_TIMESTAMP,5,CURRENT_TIMESTAMP+INTERVAL '30 minutes')",oldKey);
+		var budget=jdbc.queryForMap("SELECT last_issued_at,failed_attempts,failure_window_end FROM email_otp_limits WHERE email_key=? AND purpose='REAUTH'",oldKey);
+		for(var scope:List.of("request-email","verify-email")){
+			jdbc.update("INSERT INTO email_otp_rate_limits(bucket_key,purpose,window_started_at,hits) VALUES (?,'REAUTH',CURRENT_TIMESTAMP,5)",legacyHash(scope,"proof@example.test"));
+		}
+		var oldLimits=jdbc.queryForList("SELECT * FROM email_otp_limits ORDER BY email_key,purpose");
+		var oldRates=jdbc.queryForList("SELECT * FROM email_otp_rate_limits ORDER BY bucket_key,purpose");
+		var users=jdbc.queryForList("SELECT * FROM users ORDER BY id");var identities=jdbc.queryForList("SELECT * FROM auth_identities ORDER BY id");
+		var challenges=jdbc.queryForList("SELECT id,purpose,state,consumed_at FROM email_otp_challenges ORDER BY id");
+		try(var context=startApplication(WebApplicationType.NONE)){
+			var latest=context.getBean(Flyway.class);
+			assertThat(java.util.Arrays.stream(latest.info().applied()).limit(5).map(info->info.getChecksum()).toList()).isEqualTo(checksums);
+			assertThat(jdbc.queryForList("SELECT * FROM users ORDER BY id")).isEqualTo(users);assertThat(jdbc.queryForList("SELECT * FROM auth_identities ORDER BY id")).isEqualTo(identities);
+			assertThat(jdbc.queryForList("SELECT id,purpose,state,consumed_at FROM email_otp_challenges ORDER BY id")).isEqualTo(challenges);
+			assertThat(jdbc.queryForObject("SELECT count(*) FROM user_reauthentication_emails",Integer.class)).isEqualTo(1);
+			assertThat(jdbc.queryForObject("SELECT user_id FROM user_reauthentication_emails",UUID.class)).isEqualTo(proven);
+			assertThat(jdbc.queryForMap("SELECT email,status,verification_source FROM user_reauthentication_emails")).containsEntry("email","proof@example.test").containsEntry("status","VERIFIED").containsEntry("verification_source","HISTORICAL_OTP");
+			assertThat(jdbc.queryForMap("SELECT last_issued_at,failed_attempts,failure_window_end FROM email_otp_limits WHERE email_key=? AND purpose='REAUTH'",newKey)).isEqualTo(budget);
+			assertThat(jdbc.queryForObject("SELECT active_challenge_id FROM email_otp_limits WHERE email_key=? AND purpose='REAUTH'",UUID.class,newKey)).isNull();
+			assertThat(jdbc.queryForList("SELECT * FROM email_otp_limits ORDER BY email_key,purpose")).containsAll(oldLimits);
+			assertThat(jdbc.queryForList("SELECT * FROM email_otp_rate_limits ORDER BY bucket_key,purpose")).containsAll(oldRates).hasSize(oldRates.size()+2);
+			for(var scope:List.of("request-email","verify-email")){
+				var oldBucket=jdbc.queryForMap("SELECT window_started_at,hits FROM email_otp_rate_limits WHERE bucket_key=? AND purpose='REAUTH'",legacyHash(scope,"proof@example.test"));
+				assertThat(jdbc.queryForMap("SELECT window_started_at,hits FROM email_otp_rate_limits WHERE bucket_key=? AND purpose='REAUTH'",legacyHash(scope,proven+"\nproof@example.test"))).isEqualTo(oldBucket);
+			}
+			assertThat(jdbc.queryForObject("SELECT count(*) FROM reauth_email_candidates",Integer.class)).isZero();assertThat(latest.migrate().migrationsExecuted).isZero();
+		}
+	}
+	private String legacyHash(String scope,String recipient) throws Exception {
+		var digest=java.security.MessageDigest.getInstance("SHA-256");
+		digest.update(scope.getBytes(java.nio.charset.StandardCharsets.UTF_8));digest.update((byte)0);
+		return java.util.HexFormat.of().formatHex(digest.digest(recipient.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+	}
+	private UUID legacyIdentity(JdbcTemplate jdbc,UUID owner,String email){var id=UUID.randomUUID();jdbc.update("INSERT INTO auth_identities(id,user_id,provider,issuer,subject) VALUES (?,?,'email','overload:email',?)",id,owner,email);return id;}
+	private void legacyProof(JdbcTemplate jdbc,UUID owner,UUID identity,String email,String purpose){
+		String key=UUID.randomUUID().toString().replace("-","").repeat(2);var id=UUID.randomUUID();
+		jdbc.update("INSERT INTO email_otp_limits(email_key,purpose,failure_window_end) VALUES (?,?,CURRENT_TIMESTAMP+INTERVAL '30 minutes')",key,purpose);
+		jdbc.update("""
+				INSERT INTO email_otp_challenges(id,email_key,purpose,recipient,binding_hash,verifier,state,issued_at,expires_at,accepted_at,consumed_at,reauth_user_id,reauth_identity_id)
+				VALUES (?,?,?,?,?,?,'CONSUMED',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP+INTERVAL '5 minutes',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,?,?)
+				""",id,key,purpose,email,key,new byte[32],purpose.equals("LOGIN")?null:owner,purpose.equals("LOGIN")?null:identity);
 	}
 
 	@Test
