@@ -50,6 +50,11 @@ abstract class GoogleBoundOidcSecurity {
 	protected abstract org.springframework.security.oauth2.jwt.JwtDecoderFactory<ClientRegistration> decoders();
 	protected abstract void customize(OAuth2AuthorizationRequest.Builder builder);
 	protected String successPath(){return "/api/v1/auth/session";}
+	protected boolean handleFailure(HttpServletResponse response,RuntimeException failure)throws IOException{return false;}
+	protected UUID selectedIdentity(HttpServletRequest request){
+		if(request.getParameterMap().keySet().stream().anyMatch(key->!key.equals("identityId")&&!key.equals("_csrf"))){throw new IllegalArgumentException("Unexpected field");}
+		try{return UUID.fromString(request.getParameter("identityId"));}catch(IllegalArgumentException|NullPointerException invalid){throw new GoogleBoundRequests.IdentityNotFound();}
+	}
 
 	void configure(HttpSecurity http, OAuth2AccessTokenResponseClient<OAuth2AuthorizationCodeGrantRequest> tokens, OidcUserService users) {
 		ClientRegistrationRepository reauthClients = id -> {
@@ -71,7 +76,7 @@ abstract class GoogleBoundOidcSecurity {
 		var redirect = new ReauthenticationRedirectFilter(resolver,registrationId);
 		redirect.setAuthorizationRequestRepository(pending);
 		redirect.setRequestCache(new NullRequestCache());
-		redirect.setAuthenticationFailureHandler((request, response, failure) -> fail(request, response));
+		redirect.setAuthenticationFailureHandler((request, response, failure) -> fail(request, response,failure));
 		var provider = new OidcAuthorizationCodeAuthenticationProvider(grant -> {
 			try { return tokens.getTokenResponse(grant); }
 			catch (RuntimeException failure) { throw new OAuth2AuthorizationException(new OAuth2Error("google_reauthentication_failed")); }
@@ -91,9 +96,9 @@ abstract class GoogleBoundOidcSecurity {
 						|| !(token.getPrincipal() instanceof OidcUser user)) { throw new SessionReauthentication.SessionChanged(); }
 				pending.verified(request, response, user);
 				redirect(request, response, successPath());
-			} catch (RuntimeException failure) { fail(request, response); }
+			} catch (RuntimeException failure) { fail(request, response,failure); }
 		});
-		callback.setAuthenticationFailureHandler((request, response, failure) -> fail(request, response));
+		callback.setAuthenticationFailureHandler((request, response, failure) -> fail(request, response,failure));
 		http.addFilterBefore(redirect, OAuth2AuthorizationRequestRedirectFilter.class);
 		http.addFilterBefore(new Boundary(), ReauthenticationRedirectFilter.class);
 		http.addFilterBefore(callback, OAuth2LoginAuthenticationFilter.class);
@@ -123,16 +128,14 @@ abstract class GoogleBoundOidcSecurity {
 			try {
 				var snapshot = sessions.capture(request, principal.userId()); request.setAttribute(SNAPSHOT, snapshot);
 				if (exact(request, "POST", START)) {
-					if(request.getParameterMap().keySet().stream().anyMatch(key->!key.equals("identityId")&&!key.equals("_csrf"))){error(response,400,"INVALID_REQUEST");return;}
 					UUID identity;
-					try { identity = UUID.fromString(request.getParameter("identityId")); }
-					catch (IllegalArgumentException | NullPointerException invalid) { throw new GoogleBoundRequests.IdentityNotFound(); }
+					try {identity=selectedIdentity(request);}catch(GoogleBoundRequests.IdentityNotFound missing){throw missing;}catch(IllegalArgumentException invalid){error(response,400,"INVALID_REQUEST");return;}
 					pending.begin(request, snapshot, identity);
 				}
 				chain.doFilter(request, response);
 			} catch (GoogleBoundRequests.IdentityNotFound missing) {
 				restore(request); error(response, 404, "IDENTITY_NOT_FOUND");
-			} catch (RuntimeException failure) { fail(request, response); }
+			} catch (RuntimeException failure) { fail(request, response,failure); }
 		}
 	}
 	private static boolean exact(HttpServletRequest request, String method, String path) {
@@ -142,12 +145,14 @@ abstract class GoogleBoundOidcSecurity {
 		if (request.getAttribute(ORIGINAL_CONTEXT) instanceof SecurityContext original) { SecurityContextHolder.setContext(original); }
 		else { SecurityContextHolder.clearContext(); }
 	}
-	private void fail(HttpServletRequest request, HttpServletResponse response) { restore(request); redirect(request, response, FAILURE); }
+	private void fail(HttpServletRequest request, HttpServletResponse response,RuntimeException failure)throws IOException {
+		restore(request);if(!handleFailure(response,failure)){redirect(request,response,FAILURE);}
+	}
 	private static void redirect(HttpServletRequest request, HttpServletResponse response, String path) {
 		response.setHeader("Cache-Control", "no-store"); response.setHeader("Referrer-Policy", "no-referrer");
 		response.setStatus(302); response.setHeader("Location", request.getContextPath() + path);
 	}
-	private static void error(HttpServletResponse response, int status, String code) throws IOException {
+	protected static void error(HttpServletResponse response, int status, String code) throws IOException {
 		response.setStatus(status); response.setContentType("application/json"); response.getWriter().write("{\"code\":\"" + code + "\"}");
 	}
 }

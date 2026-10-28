@@ -9,6 +9,8 @@ Google/이메일 자동 병합 금지와 기존 seed 정책은 [계정 계약](a
 EMAIL 수단 변경에는 [typed 이메일 소유 증명](email-identities.md)이 추가로 필요하다. 기존 reauthenticatedAt
 시각만으로는 허용하지 않는다. SessionMetadata 직렬화 형식은 유지하고 별도 세션 속성으로 실제 OTP 출처·
 사용자·세션·대표 연락처·검증 시각을 저장한다. 세션 회전은 허용된 증명의 원래 검증 시각을 보존한다.
+Google 수단 변경도 같은 서버 소유 증명을 사용한다. [LINK/UNLINK](google-identities.md)는 기존 세션·proof 시각을
+갱신하지 않으며, 별도 일회 Pending과 해제 세대로 오래된 연결 완료를 차단한다.
 Google 최근 재인증은 [007-1C-3B-2](google-reauthentication.md)에서 검증된 auth_time을 요구하며
 같은 JDBC 교체/CSRF/최종 응답 검증을 사용하며 독립 `GOOGLE_REAUTH_ENABLED` 기본값은 false다.
 모든 계정의 [공통 대표 이메일 OTP](reauthentication-email.md)는 기존 회전 경계를 재사용한다.

@@ -38,12 +38,13 @@ public class ReauthenticationSessionRepository {
 		if(!java.util.Objects.equals(rotation.emailProof(),read(rotation.sessionId(),false).proof())){throw new SessionReauthentication.SessionChanged();}
 	}
 
-	public void requireEmailOwnership(SessionReauthentication.Snapshot expected,UUID contact,String email) {
+	public EmailOwnershipProof requireEmailOwnership(SessionReauthentication.Snapshot expected,UUID contact,String email) {
 		var stored=locked(expected);
 		if(!(stored.proof() instanceof EmailOwnershipProof proof)
 				|| !proof.matches(expected.userId(),expected.sessionId(),contact,email,policy.now())){
 			throw new EmailProofRequired();
 		}
+		return proof;
 	}
 
 	public SessionReauthentication.Rotation withEmailProof(SessionReauthentication.Rotation rotation,EmailOwnershipProof.Verification verification) {

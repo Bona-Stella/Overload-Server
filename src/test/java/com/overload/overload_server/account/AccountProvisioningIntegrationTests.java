@@ -77,7 +77,7 @@ class AccountProvisioningIntegrationTests {
 				WHERE table_schema = 'public' ORDER BY table_name
 				""", String.class)).containsExactly("auth_identities", "email_otp_challenges", "email_otp_limits",
 				"email_otp_login_claims", "email_otp_rate_limits", "exercise_definitions",
-				"flyway_schema_history", "reauth_email_candidates", "spring_session", "spring_session_attributes", "user_reauthentication_emails", "user_workout_settings", "users");
+				"flyway_schema_history", "google_identity_change_versions", "reauth_email_candidates", "spring_session", "spring_session_attributes", "user_reauthentication_emails", "user_workout_settings", "users");
 	}
 
 	@Test

@@ -32,6 +32,7 @@ final class OtpChallenges {
 	UUID request(Context context, String remoteIp, Runnable validateContext) {
 		return request(context,remoteIp,validateContext,now->{ });
 	}
+	boolean ready(){return crypto.ready()&&sender.ready();}
 	UUID request(Context context,String remoteIp,Runnable validateContext,java.util.function.Consumer<Instant> reserved) {
 		requireNoTransaction();
 		if (!crypto.ready() || !sender.ready()) { throw new OtpFailure(503, "OTP_UNAVAILABLE"); }

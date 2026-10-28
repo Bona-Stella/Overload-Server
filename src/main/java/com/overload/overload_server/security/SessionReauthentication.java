@@ -44,8 +44,8 @@ public class SessionReauthentication {
 	public Rotation rotateWithEmailProof(Snapshot expected, EmailOwnershipProof.Verification proof) {
 		return repository.withEmailProof(rotate(expected),proof);
 	}
-	public void requireEmailOwnership(Snapshot expected, UUID contact, String email) {
-		repository.requireEmailOwnership(expected,contact,email);
+	public EmailOwnershipProof requireEmailOwnership(Snapshot expected, UUID contact, String email) {
+		return repository.requireEmailOwnership(expected,contact,email);
 	}
 	public void validateRotation(Rotation rotation) { repository.validateRotation(rotation); }
 

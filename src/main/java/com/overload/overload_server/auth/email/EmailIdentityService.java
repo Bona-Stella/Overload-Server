@@ -18,16 +18,16 @@ import java.util.UUID;
 public class EmailIdentityService {
     private final JdbcTemplate jdbc;
     private final TransactionTemplate transaction;
-    private final ReauthenticationEmails contacts;
+    private final com.overload.overload_server.auth.identity.IdentityChangeAuthorization authorization;
     private final SessionReauthentication sessions;
-    private final boolean googleLoginEnabled;
+    private final com.overload.overload_server.auth.identity.LoginAvailability availability;
 
     public EmailIdentityService(JdbcTemplate jdbc, PlatformTransactionManager manager,
-            ReauthenticationEmails contacts, SessionReauthentication sessions,
-            @org.springframework.beans.factory.annotation.Value("${GOOGLE_OIDC_ENABLED:false}") boolean googleLoginEnabled) {
-        this.jdbc=jdbc; this.transaction=new TransactionTemplate(manager); this.contacts=contacts; this.sessions=sessions;
+            com.overload.overload_server.auth.identity.IdentityChangeAuthorization authorization, SessionReauthentication sessions,
+            com.overload.overload_server.auth.identity.LoginAvailability availability) {
+        this.jdbc=jdbc; this.transaction=new TransactionTemplate(manager); this.authorization=authorization; this.sessions=sessions;
         this.transaction.setIsolationLevel(org.springframework.transaction.TransactionDefinition.ISOLATION_READ_COMMITTED);
-        this.googleLoginEnabled=googleLoginEnabled;
+        this.availability=availability;
     }
 
     public Linked link(UUID user, HttpServletRequest request) {
@@ -60,7 +60,7 @@ public class EmailIdentityService {
                 throw new OtpFailure(404,"IDENTITY_NOT_FOUND");
             }
             if(owned.stream().noneMatch(value->!value.id().equals(identity)
-                    && (value.provider().equals("email") || (googleLoginEnabled&&value.provider().equals("google"))))){
+                    && availability.usable(value.provider()))){
                 throw new OtpFailure(409,"LAST_LOGIN_IDENTITY");
             }
             // V5 history must survive credential deletion. Its old binding is already unusable since V6.
@@ -78,16 +78,7 @@ public class EmailIdentityService {
     }
 
     private ReauthenticationEmails.Contact authorize(SessionReauthentication.Snapshot snapshot) {
-        contacts.lockUser(snapshot.userId());
-        // Same order for link/unlink/OTP: user -> owned identities -> session. Never locks another user's identity.
-        jdbc.queryForList("SELECT id FROM auth_identities WHERE user_id=? ORDER BY id FOR UPDATE",UUID.class,snapshot.userId());
-        var contact=contacts.contact(snapshot.userId()).orElseThrow(()->new OtpFailure(409,"REAUTH_EMAIL_REQUIRED"));
-        Runnable proof=()->sessions.requireEmailOwnership(snapshot,contact.id(),contact.email());
-        proof.run();
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization(){
-            @Override public void beforeCommit(boolean readOnly){proof.run();}
-        });
-        return contact;
+        return authorization.authorize(snapshot,null).contact();
     }
 
     public record Linked(UUID identityId,boolean created) { }

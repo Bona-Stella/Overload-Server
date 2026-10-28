@@ -58,7 +58,7 @@ public class ReauthenticationEmails {
 	}
 	Candidate candidate(SessionReauthentication.Snapshot snapshot,UUID id) {
 		if(id==null){throw new OtpFailure(400,"INVALID_REQUEST");}
-		var rows=jdbc.query("SELECT id,google_identity_id,email,binding_hash,expires_at,consumed_at,google_subject FROM reauth_email_candidates WHERE user_id=? AND id=?",
+		var rows=jdbc.query("SELECT id,google_identity_id,email,binding_hash,expires_at,consumed_at,google_subject FROM reauth_email_candidates WHERE user_id=? AND id=? AND google_identity_id IS NOT NULL",
 				(row,index)->new Candidate(row.getObject(1,UUID.class),row.getObject(2,UUID.class),row.getString(3),row.getString(4),row.getTimestamp(5).toInstant(),row.getTimestamp(6)==null,row.getString(7)),snapshot.userId(),id);
 		var value=rows.stream().findFirst().orElseThrow(()->new OtpFailure(401,"OTP_INVALID"));
 		if(!value.pending()||!clock.instant().isBefore(value.expiresAt())||!binding(snapshot,id).equals(value.binding())){throw new OtpFailure(401,"OTP_INVALID");}

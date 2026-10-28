@@ -14,6 +14,8 @@ EMAIL 수단 연결·해제는 [별도 명시 API](email-identities.md)이며 �
 ## HTTP 계약
 
 모든 POST는 기존 GET `/api/v1/auth/csrf`에서 얻은 `X-CSRF-TOKEN`과 같은 세션 쿠키가 필요하다.
+EMAIL_LOGIN_ENABLED는 기본 true다. 명시적으로 false이면 LOGIN request/verify는 503 EMAIL_LOGIN_UNAVAILABLE이며
+공통 REAUTH/CONTACT_ENROLL은 이 플래그로 끄지 않는다. 마지막 로그인 수단 보호는 실제 로컬 ready도 확인한다.
 두 이메일 경로만 익명 POST 접근을 허용하며 CSRF 제외는 추가하지 않았다.
 이미 인증된 세션에서는 이메일과 관계없이 **409 LOGOUT_REQUIRED**다. 사용자를 암묵적으로 교체하거나
 이 경로를 계정 연결·재인증으로 사용하지 않는다.

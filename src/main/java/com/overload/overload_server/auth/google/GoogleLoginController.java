@@ -46,5 +46,11 @@ public class GoogleLoginController {
 	ResponseEntity<Map<String,String>> contactCallbackUnavailable(){return contactUnavailable();}
 	@GetMapping("/auth/google/contact/failure")
 	ResponseEntity<Map<String,String>> contactFailure(){return ResponseEntity.status(401).cacheControl(CacheControl.noStore()).header("Referrer-Policy","no-referrer").body(Map.of("code","GOOGLE_CONTACT_FAILED"));}
+	@PostMapping("/oauth2/link/google")
+	ResponseEntity<Map<String,String>> linkUnavailable(){return ResponseEntity.status(503).cacheControl(CacheControl.noStore()).header("Referrer-Policy","no-referrer").body(Map.of("code","GOOGLE_LINK_UNAVAILABLE"));}
+	@GetMapping("/login/oauth2/code/google-link")
+	ResponseEntity<Map<String,String>> linkCallbackUnavailable(){return linkUnavailable();}
+	@GetMapping("/auth/google/link/failure")
+	ResponseEntity<Map<String,String>> linkFailure(){return ResponseEntity.status(401).cacheControl(CacheControl.noStore()).header("Referrer-Policy","no-referrer").body(Map.of("code","GOOGLE_LINK_FAILED"));}
 
 }

@@ -9,7 +9,7 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 import java.util.Map;
 
-@RestControllerAdvice(assignableTypes = {EmailOtpController.class, EmailReauthenticationController.class,EmailIdentityController.class})
+@RestControllerAdvice(assignableTypes = {EmailOtpController.class, EmailReauthenticationController.class,EmailIdentityController.class,com.overload.overload_server.auth.identity.GoogleIdentityController.class})
 public class EmailOtpErrors {
 
 	@ExceptionHandler(OtpFailure.class)
@@ -23,9 +23,11 @@ public class EmailOtpErrors {
 
 	@ExceptionHandler(DataAccessException.class)
 	ResponseEntity<Map<String, String>> databaseUnavailable(jakarta.servlet.http.HttpServletRequest request) {
-		return failure(new OtpFailure(503, request.getRequestURI().startsWith(request.getContextPath()+"/api/v1/auth/identities/email/")
+		return failure(new OtpFailure(503, request.getRequestURI().startsWith(request.getContextPath()+"/api/v1/auth/identities/")
 				? "IDENTITY_CHANGE_UNAVAILABLE" : "OTP_UNAVAILABLE"));
 	}
+	@ExceptionHandler(com.overload.overload_server.auth.identity.IdentityChangeFailure.class)
+	ResponseEntity<Map<String,String>> identityChange(com.overload.overload_server.auth.identity.IdentityChangeFailure failure){return failure(new OtpFailure(failure.status,failure.code));}
 
 	@ExceptionHandler(com.overload.overload_server.security.ReauthenticationSessionRepository.EmailProofRequired.class)
 	ResponseEntity<Map<String,String>> emailProofRequired(){return failure(new OtpFailure(403,"EMAIL_OWNERSHIP_PROOF_REQUIRED"));}

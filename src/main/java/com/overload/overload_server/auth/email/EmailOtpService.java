@@ -46,6 +46,7 @@ public class EmailOtpService {
 	}
 
 	OtpChallenges challenges() { return challenges; }
+	public boolean available(){return challenges.ready();}
 	private static OtpChallenges.Context login(String email, String nonce) {
 		try {
 			if (email == null || email.length() > 254) { throw new IllegalArgumentException(); }

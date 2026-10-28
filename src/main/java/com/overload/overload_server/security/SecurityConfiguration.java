@@ -106,7 +106,7 @@ public class SecurityConfiguration {
 						.requestMatchers("/api/v1/health").permitAll()
 						.requestMatchers(org.springframework.http.HttpMethod.GET, "/api/v1/auth/csrf").permitAll()
 						.requestMatchers(org.springframework.http.HttpMethod.GET, "/oauth2/authorization/google",
-								"/login/oauth2/code/google", "/auth/google/failure", "/auth/google/reauth/failure", "/auth/google/contact/failure").permitAll()
+								"/login/oauth2/code/google", "/auth/google/failure", "/auth/google/reauth/failure", "/auth/google/contact/failure", "/auth/google/link/failure").permitAll()
 						.requestMatchers(org.springframework.http.HttpMethod.POST,
 								"/api/v1/auth/email-otp/request", "/api/v1/auth/email-otp/verify").permitAll()
 						.anyRequest().authenticated())

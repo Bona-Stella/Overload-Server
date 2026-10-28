@@ -44,6 +44,15 @@ abstract class GoogleBoundRequests implements AuthorizationRequestRepository<OAu
 		if (identity == null || identities.google(snapshot.userId(), identity, false).isEmpty()) { throw new IdentityNotFound(); }
 		request.setAttribute(started, new Pending(purpose, snapshot, identity, policy.now(), null));
 	}
+	protected void startPending(HttpServletRequest request,SessionReauthentication.Snapshot snapshot,
+			com.overload.overload_server.security.EmailOwnershipProof proof,long version){
+		request.setAttribute(started,new Pending(purpose,snapshot,null,policy.now(),null,proof,version));
+	}
+	protected void validatePending(Pending pending){validateOwner(pending);}
+	private void validateBound(Pending pending){
+		if(!purpose.equals(pending.purpose())){throw new SessionReauthentication.SessionChanged();}
+		validatePending(pending);
+	}
 
 	@Override public OAuth2AuthorizationRequest loadAuthorizationRequest(HttpServletRequest request) {
 		var session = request.getSession(false);
@@ -64,9 +73,9 @@ abstract class GoogleBoundRequests implements AuthorizationRequestRepository<OAu
 	private void save(OAuth2AuthorizationRequest authorization, HttpServletRequest request) {
 		if (authorization == null) { return; }
 		if (!(request.getAttribute(started) instanceof Pending started)) { throw new SessionReauthentication.SessionChanged(); }
-		var pending = new Pending(started.purpose(), started.snapshot(), started.identity(), started.startedAt(), authorization);
+		var pending = new Pending(started.purpose(), started.snapshot(), started.identity(), started.startedAt(), authorization,started.emailProof(),started.identityVersion());
 		transaction.executeWithoutResult(status -> {
-			validateOwner(pending); sessions.validate(pending.snapshot());
+			validateBound(pending); sessions.validate(pending.snapshot());
 			jdbc.update("""
 					INSERT INTO spring_session_attributes (session_primary_id, attribute_name, attribute_bytes)
 					SELECT primary_id, ?, ? FROM spring_session WHERE session_id = ?
@@ -86,7 +95,7 @@ abstract class GoogleBoundRequests implements AuthorizationRequestRepository<OAu
 			// Read the identity hint first, then identity -> session locks, matching email REAUTH lock order.
 			var hint = read(snapshot.sessionId());
 			if (hint == null || !matches(hint, request.getParameter("state")) || !hint.snapshot().equals(snapshot)) { return null; }
-			validateOwner(hint); sessions.validate(snapshot);
+			validateBound(hint); sessions.validate(snapshot);
 			var current = read(snapshot.sessionId());
 			if (current == null || !matches(current, request.getParameter("state")) || !current.snapshot().equals(snapshot)) { return null; }
 			int consumed = jdbc.update("""
@@ -119,7 +128,8 @@ abstract class GoogleBoundRequests implements AuthorizationRequestRepository<OAu
 				pending.authorization().getState().getBytes(StandardCharsets.UTF_8), state.getBytes(StandardCharsets.UTF_8));
 	}
 	protected record Pending(String purpose, SessionReauthentication.Snapshot snapshot, UUID identity, Instant startedAt,
-			OAuth2AuthorizationRequest authorization) implements Serializable {
+			OAuth2AuthorizationRequest authorization,com.overload.overload_server.security.EmailOwnershipProof emailProof,long identityVersion) implements Serializable {
+		Pending(String purpose,SessionReauthentication.Snapshot snapshot,UUID identity,Instant startedAt,OAuth2AuthorizationRequest authorization){this(purpose,snapshot,identity,startedAt,authorization,null,0);}
 		@Override public String toString() { return "GoogleReauthenticationPending[redacted]"; }
 	}
 	static final class IdentityNotFound extends RuntimeException { }

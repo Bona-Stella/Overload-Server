@@ -22,14 +22,17 @@ public class EmailOtpController {
 	private static final String BROWSER_NONCE = EmailOtpController.class.getName() + ".browserNonce";
 	private final EmailOtpService otp;
 	private final VerifiedSessionLogin sessions;
+	private final com.overload.overload_server.auth.identity.LoginAvailability availability;
 
-	EmailOtpController(EmailOtpService otp, VerifiedSessionLogin sessions) {
+	EmailOtpController(EmailOtpService otp, VerifiedSessionLogin sessions,com.overload.overload_server.auth.identity.LoginAvailability availability) {
 		this.otp = otp;
 		this.sessions = sessions;
+		this.availability=availability;
 	}
 
 	@PostMapping("/api/v1/auth/email-otp/request")
 	ResponseEntity<Map<String, Object>> request(@RequestBody Request body, HttpServletRequest request) {
+		requireEnabled();
 		requireAnonymous();
 		var id = otp.request(body.email(), request.getRemoteAddr(), browserNonce(request));
 		return ResponseEntity.accepted().cacheControl(CacheControl.noStore())
@@ -38,6 +41,7 @@ public class EmailOtpController {
 
 	@PostMapping("/api/v1/auth/email-otp/verify")
 	ResponseEntity<Void> verify(@RequestBody Verification body, HttpServletRequest request, HttpServletResponse response) {
+		requireEnabled();
 		requireAnonymous();
 		var verified = otp.verifyLogin(body.email(), body.challengeId(), body.code(), request.getRemoteAddr(), browserNonce(request));
 		try {
@@ -47,6 +51,7 @@ public class EmailOtpController {
 		}
 		return ResponseEntity.noContent().cacheControl(CacheControl.noStore()).build();
 	}
+	private void requireEnabled(){if(!availability.emailEnabled()){throw new OtpFailure(503,"EMAIL_LOGIN_UNAVAILABLE");}}
 
 	private static void requireAnonymous() {
 		var authentication = SecurityContextHolder.getContext().getAuthentication();

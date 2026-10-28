@@ -68,6 +68,7 @@ identity의 해제도 가능하다. unlink 반복은 404이고 재인증 증명 
 인증·CSRF → 형식 → 대표 연락처/증명 → 대상 소유권/개수 순으로 검사한다.
 증명이 없는 요청은 다른 계정의 소유권 상태를 조회하는 도구가 되지 않는다.
 Google 수단은 GOOGLE_OIDC_ENABLED=true일 때만 해제 후 사용 가능한 대안으로 센다.
+EMAIL도 EMAIL_LOGIN_ENABLED=true 및 OTP HMAC/sender의 로컬 ready가 필요하다. 기본값 true는 기존 LOGIN을 유지한다.
 GOOGLE_REAUTH_ENABLED의 false 기본값은 바꾸지 않는다.
 
 ## 트랜잭션과 경합
@@ -107,8 +108,6 @@ LOGIN/CONTACT_ENROLL/현재 contact REAUTH CHECK·FK와 전역 credential unique
 
 ## 3B-3B 재사용 경계
 
-현재 principal/대표 연락처/typed 이메일 증명 확인과 사용자→identity→세션 잠금, 커밋 직전 재검사,
-JDBC 회전·증명 계승을 재사용할 수 있다. Google 연결은 추가로 새 Google 신원 소유권을 공식 OIDC로
-증명해야 하며, Google 표시 이메일로 연결/병합해서는 안 된다. Google CONTACT 후보 FK와 마지막 수단 검사에
-대한 별도 해제 설계가 필요하다. EMAIL용 legacy 참조 보존을 그대로 Google 해제로 확장하지 않는다.
-이번 API로 Google identity를 새로 생성하거나 해제할 수 없다.
+현재 principal/대표 연락처/typed 이메일 증명과 사용자→identity→세션 잠금은 공통 IdentityChangeAuthorization으로
+추출해 [Google LINK/UNLINK](google-identities.md)에서도 사용한다. Google 수단의 OIDC·후보 FK/해제 세대는 별도 처리한다.
+EMAIL API로 Google identity를 생성/해제할 수 없으며, Google 표시 이메일 기반 자동 연결/병합도 없다.
