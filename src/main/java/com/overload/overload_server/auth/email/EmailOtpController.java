@@ -39,9 +39,9 @@ public class EmailOtpController {
 	@PostMapping("/api/v1/auth/email-otp/verify")
 	ResponseEntity<Void> verify(@RequestBody Verification body, HttpServletRequest request, HttpServletResponse response) {
 		requireAnonymous();
-		var account = otp.verify(body.email(), body.challengeId(), body.code(), request.getRemoteAddr(), browserNonce(request));
+		var verified = otp.verifyLogin(body.email(), body.challengeId(), body.code(), request.getRemoteAddr(), browserNonce(request));
 		try {
-			sessions.establish(request, response, account.id());
+			sessions.establish(request, response, verified.account().id(),verified.proof());
 		} catch (RuntimeException exception) {
 			throw new OtpFailure(503, "OTP_UNAVAILABLE");
 		}

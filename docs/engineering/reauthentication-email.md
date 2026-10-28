@@ -9,6 +9,8 @@
 `user_reauthentication_emails`는 `user_id` PK/FK로 사용자당 최대 한 행만 가진다.
 `id` UUID, 정규화된 `email`, VERIFIED 전용 `status`, `verified_at`, `verification_source`를 저장한다.
 주소에는 계정 간 UNIQUE 제약이 없다. 동일 주소라도 UUID별 연락처·OTP·세션은 분리된다.
+대표 이메일과 실제 OTP를 검증한 세션에서는 별도 [EMAIL 로그인 수단 연결·해제](email-identities.md)를
+명시 요청할 수 있다. 연락처 등록 자체는 로그인 identity를 생성하지 않는다.
 반면 로그인 identity의 `(provider,issuer,subject)` 소유권 UNIQUE/FK 계약은 그대로다.
 연락처 등록은 EMAIL identity 생성·계정 연결·병합을 하지 않는다.
 

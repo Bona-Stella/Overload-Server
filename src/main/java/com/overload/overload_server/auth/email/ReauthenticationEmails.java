@@ -32,13 +32,13 @@ public class ReauthenticationEmails {
 		return jdbc.query("SELECT id,email,verified_at FROM user_reauthentication_emails WHERE user_id=? AND status='VERIFIED'",
 				(row,index)->new Contact(row.getObject(1,UUID.class),row.getString(2),row.getTimestamp(3).toInstant()),user).stream().findFirst();
 	}
-	void verifiedEmailLogin(UUID user, String email, Instant provedAt) {
-		transaction.executeWithoutResult(status->{
+	Contact verifiedEmailLogin(UUID user, String email, Instant provedAt) {
+		return transaction.execute(status->{
 			lockUser(user);
 			var owned=jdbc.queryForList("SELECT id FROM auth_identities WHERE user_id=? AND provider='email' AND issuer='overload:email' AND subject=? FOR SHARE",UUID.class,user,email);
 			if(owned.isEmpty()){throw new SessionReauthentication.SessionChanged();}
 			insert(user,email,provedAt,"EMAIL_LOGIN_OTP");
-			if(contact(user).isEmpty()){throw new org.springframework.dao.DataAccessResourceFailureException("Verified contact could not be persisted");}
+			return contact(user).orElseThrow(()->new org.springframework.dao.DataAccessResourceFailureException("Verified contact could not be persisted"));
 		});
 	}
 	private void insert(UUID user,String email,Instant at,String source) {

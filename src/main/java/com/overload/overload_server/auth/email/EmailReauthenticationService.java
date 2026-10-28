@@ -2,6 +2,7 @@ package com.overload.overload_server.auth.email;
 
 import com.overload.overload_server.account.AccountIdentityService;
 import com.overload.overload_server.security.SessionReauthentication;
+import com.overload.overload_server.security.EmailOwnershipProof;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
@@ -32,7 +33,7 @@ public class EmailReauthenticationService {
 		var context = context(snapshot, identity);
 		var rotation = challenges.consume(context, challenge, code, request.getRemoteAddr(),
 				() -> validate(context, snapshot, identity), now -> {
-					var updated = sessions.rotate(snapshot);
+					var updated = sessions.rotateWithEmailProof(snapshot,EmailOwnershipProof.verified(context.contactId(),context.email(),now,EmailOwnershipProof.Source.EMAIL_REAUTH));
 					sessions.validateRotation(updated);
 					return updated;
 				});
@@ -66,7 +67,8 @@ public class EmailReauthenticationService {
 		var context=new OtpChallenges.Context(OtpPurpose.CONTACT_ENROLL,candidate.email(),candidate.binding(),user,candidate.identity());
 		var rotation=challenges.consume(context,challenge,code,request.getRemoteAddr(),()->validateCandidate(snapshot,candidate),now->{
 			contacts.registerCandidate(snapshot,candidate,now);
-			var updated=sessions.rotate(snapshot);sessions.validateRotation(updated);return updated;
+			var contact=contacts.contact(user).orElseThrow(SessionReauthentication.SessionChanged::new);
+			var updated=sessions.rotateWithEmailProof(snapshot,EmailOwnershipProof.verified(contact.id(),contact.email(),now,EmailOwnershipProof.Source.CONTACT_ENROLL));sessions.validateRotation(updated);return updated;
 		});
 		sessions.complete(request,response,rotation);
 	}

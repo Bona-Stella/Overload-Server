@@ -29,12 +29,19 @@ public class VerifiedSessionLogin {
 	}
 
 	public void establish(HttpServletRequest request, HttpServletResponse response, UUID verifiedUserId) {
+		establish(request,response,verifiedUserId,null);
+	}
+
+	public void establish(HttpServletRequest request, HttpServletResponse response, UUID verifiedUserId,
+			EmailOwnershipProof.Verification emailVerification) {
 		try {
 			// A fresh JDBC primary key prevents late anonymous writes from undoing ID rotation.
 			if (request.getSession(false) != null) {
 				request.getSession(false).invalidate();
 			}
 			sessions.establishAfterVerification(request, response, verifiedUserId);
+			var proof=emailVerification==null?null:emailVerification.bind(verifiedUserId,request.getSession().getId());
+			if(proof!=null){request.getSession().setAttribute(EmailOwnershipProof.ATTRIBUTE,proof);}
 			var expected = policy.activeMetadata(request.getSession(false)).orElseThrow(IllegalStateException::new);
 			var stored = storedSessions.findById(request.getSession().getId());
 			// Session JDBC can suppress integrity failures as concurrent deletion: verify the durable result.
@@ -44,7 +51,8 @@ public class VerifiedSessionLogin {
 					|| !(context.getAuthentication().getPrincipal() instanceof SessionPrincipal principal)
 					|| !principal.userId().equals(verifiedUserId)
 					|| !(stored.getAttribute(SessionMetadata.ATTRIBUTE) instanceof SessionMetadata metadata)
-					|| !metadata.equals(expected)) {
+					|| !metadata.equals(expected)
+					|| !java.util.Objects.equals(proof,stored.getAttribute(EmailOwnershipProof.ATTRIBUTE))) {
 				throw new IllegalStateException();
 			}
 		} catch (RuntimeException exception) {

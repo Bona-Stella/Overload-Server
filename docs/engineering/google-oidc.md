@@ -4,6 +4,8 @@
 Boot 4.1.2 BOM을 사용하며, JWT를 앱 인증 수단으로 발급하지 않는다. 기존 이메일 OTP·JDBC 세션을 유지한다.
 실제 Google 계정 브라우저 E2E는 별도 [3A-LIVE 보고서](../tasks/task-007-1c-3a-live-validation-report.md)에서 검증했다.
 이번 재인증 작업의 자동화는 루프백 OIDC 서버의 서명된 토큰과 실제 PostgreSQL을 사용하며 Google 실로그인을 반복하지 않는다.
+일반 SSO가 초기화한 reauthenticatedAt는 [EMAIL 수단 변경의 소유 증명](email-identities.md)이 아니다.
+EMAIL identity 연결·해제에는 최근 대표 이메일 OTP 증명이 따로 필요하며 Google 수단 연결·해제는 미구현이다.
 
 ## 로컬 설정·실행
 

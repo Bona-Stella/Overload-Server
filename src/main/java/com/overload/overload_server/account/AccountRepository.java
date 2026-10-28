@@ -16,7 +16,7 @@ class AccountRepository {
 	}
 
 	Optional<Account> findByIdentity(VerifiedIdentity identity) {
-		return jdbc.query("""
+		var result=jdbc.query("""
 				SELECT u.id, u.data_generation, u.nickname
 				FROM users u JOIN auth_identities a ON a.user_id = u.id
 				WHERE a.provider = ? AND a.issuer = ? AND a.subject = ?
@@ -24,6 +24,11 @@ class AccountRepository {
 				""", (row, index) -> new Account(row.getObject("id", UUID.class),
 				row.getLong("data_generation"), row.getString("nickname")),
 				identity.provider().databaseValue(), identity.issuer(), identity.subject()).stream().findFirst();
+		// A SELECT waiting for the user lock may have seen a credential deleted by unlink.
+		// Re-read its ownership in this READ COMMITTED transaction after the lock was acquired.
+		return result.filter(account->!jdbc.queryForList("""
+				SELECT id FROM auth_identities WHERE user_id=? AND provider=? AND issuer=? AND subject=? FOR SHARE
+				""",UUID.class,account.id(),identity.provider().databaseValue(),identity.issuer(),identity.subject()).isEmpty());
 	}
 
 	Account createUser(String nickname) {

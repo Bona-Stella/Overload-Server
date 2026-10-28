@@ -3,6 +3,7 @@ package com.overload.overload_server.auth.email;
 import com.overload.overload_server.account.Account;
 import com.overload.overload_server.account.AccountProvisioningService;
 import com.overload.overload_server.account.VerifiedIdentity;
+import com.overload.overload_server.security.EmailOwnershipProof;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.PlatformTransactionManager;
 
@@ -25,14 +26,23 @@ public class EmailOtpService {
 	}
 
 	public Account verify(String inputEmail, UUID issuanceId, String code, String remoteIp, String browserNonce) {
+		return verifyLogin(inputEmail,issuanceId,code,remoteIp,browserNonce).account();
+	}
+
+	VerifiedLogin verifyLogin(String inputEmail, UUID issuanceId, String code, String remoteIp, String browserNonce) {
 		var context = login(inputEmail, browserNonce);
 		var provedAt=challenges.consume(context, issuanceId, code, remoteIp, () -> { }, now -> now);
 		try {
 			var account=accounts.provision(VerifiedIdentity.email(context.email()), null);
-			contacts.verifiedEmailLogin(account.id(),context.email(),provedAt);
-			return account;
+			var contact=contacts.verifiedEmailLogin(account.id(),context.email(),provedAt);
+			var proof=contact.email().equals(context.email())
+					? EmailOwnershipProof.verified(contact.id(),contact.email(),provedAt,EmailOwnershipProof.Source.EMAIL_LOGIN) : null;
+			return new VerifiedLogin(account,proof);
 		}
 		catch (RuntimeException exception) { challenges.releaseLogin(issuanceId); throw exception; }
+	}
+	record VerifiedLogin(Account account,EmailOwnershipProof.Verification proof) {
+		@Override public String toString(){return "VerifiedEmailLogin[redacted]";}
 	}
 
 	OtpChallenges challenges() { return challenges; }

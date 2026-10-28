@@ -5,7 +5,8 @@
 후속 1C-2-LIVE에서 별도 승인한 실발송·수신·PostgreSQL 로그인을 검증했다.
 Google OIDC 서버는 [1C-3A](google-oidc.md)로 추가했다. 인증된 사용자용 이메일 재인증은
 [1C-3B-1 별도 계약](email-reauthentication.md)을 따른다. 아래의 소비·프로비저닝 경계는 LOGIN 경로의 계약이다.
-계정 연결/변경·실제 민감 업무 쓰기는 후속 범위다. 공통 재인증 보완에서는 실제 LOGIN OTP 소비 시각과
+EMAIL 수단 연결·해제는 [별도 명시 API](email-identities.md)이며 새 LOGIN OTP 검증도 현재 대표 주소와
+일치할 때 typed 소유 증명을 제공한다. 연락처 변경·다른 민감 업무 쓰기는 후속 범위다. 공통 재인증 보완에서는 실제 LOGIN OTP 소비 시각과
 프로비저닝된 EMAIL 신원 소유권을 재사용해 [대표 재인증 이메일](reauthentication-email.md)을 최초 등록한다.
 이미 VERIFIED 연락처가 있으면 변경하지 않으며 추가 메일을 보내지 않는다. 일반 프로비저닝만으로는 등록하지 않는다.
 공통 REAUTH와 CONTACT_ENROLL은 목적/사용자/세션을 분리하며 이 LOGIN API의 익명 성공 계약은 유지한다.

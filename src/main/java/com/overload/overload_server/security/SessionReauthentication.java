@@ -41,6 +41,12 @@ public class SessionReauthentication {
 	public void validate(Snapshot expected) { repository.validate(expected); }
 	public Rotation rotate(Snapshot expected) { return repository.rotate(expected); }
 	public Rotation rotate(Snapshot expected, java.time.Instant authenticatedAt) { return repository.rotate(expected, authenticatedAt); }
+	public Rotation rotateWithEmailProof(Snapshot expected, EmailOwnershipProof.Verification proof) {
+		return repository.withEmailProof(rotate(expected),proof);
+	}
+	public void requireEmailOwnership(Snapshot expected, UUID contact, String email) {
+		repository.requireEmailOwnership(expected,contact,email);
+	}
 	public void validateRotation(Rotation rotation) { repository.validateRotation(rotation); }
 
 	public void complete(HttpServletRequest request, HttpServletResponse response, Rotation rotation) {
@@ -64,6 +70,7 @@ public class SessionReauthentication {
 		var stored = sessions.findById(rotation.sessionId());
 		if (stored == null || !policy.isActive(rotation.metadata())
 				|| !rotation.metadata().equals(stored.getAttribute(SessionMetadata.ATTRIBUTE))
+				|| !java.util.Objects.equals(rotation.emailProof(),stored.getAttribute(EmailOwnershipProof.ATTRIBUTE))
 				|| !(stored.getAttribute(HttpSessionSecurityContextRepository.SPRING_SECURITY_CONTEXT_KEY) instanceof SecurityContext context)
 				|| context.getAuthentication() == null || !context.getAuthentication().isAuthenticated()
 				|| !(context.getAuthentication().getPrincipal() instanceof SessionPrincipal principal)
@@ -93,7 +100,8 @@ public class SessionReauthentication {
 	public record Snapshot(String sessionId, UUID userId, SessionMetadata metadata) implements java.io.Serializable {
 		@Override public String toString() { return "ReauthenticationSnapshot[redacted]"; }
 	}
-	public record Rotation(Snapshot original, String sessionId, SessionMetadata metadata) {
+	public record Rotation(Snapshot original, String sessionId, SessionMetadata metadata,EmailOwnershipProof emailProof) {
+		public Rotation(Snapshot original,String sessionId,SessionMetadata metadata){this(original,sessionId,metadata,null);}
 		@Override public String toString() { return "ReauthenticationRotation[redacted]"; }
 	}
 	public static class SessionChanged extends RuntimeException {

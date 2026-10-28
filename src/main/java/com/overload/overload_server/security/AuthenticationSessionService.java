@@ -29,6 +29,9 @@ public class AuthenticationSessionService {
 	public void establishAfterVerification(HttpServletRequest request, HttpServletResponse response, UUID userId) {
 		Objects.requireNonNull(userId, "verified userId");
 		var previous = policy.activeMetadata(request.getSession(false));
+		var oldSession=request.getSession(false);
+		var emailProof=oldSession!=null&&oldSession.getAttribute(EmailOwnershipProof.ATTRIBUTE) instanceof EmailOwnershipProof proof
+				&& previous.filter(value->value.userId().equals(userId)).isPresent()&&proof.boundTo(userId,oldSession.getId(),policy.now())?proof:null;
 		if (request.getSession(false) != null && (previous.isEmpty() || !previous.get().userId().equals(userId))
 				&& request.getSession(false).getAttribute(SessionMetadata.ATTRIBUTE) != null) {
 			request.getSession(false).invalidate();
@@ -42,6 +45,8 @@ public class AuthenticationSessionService {
 		request.getSession();
 		strategy.onAuthentication(authentication, request, response);
 		var session = request.getSession();
+		if(emailProof!=null){session.setAttribute(EmailOwnershipProof.ATTRIBUTE,emailProof.rebind(session.getId()));}
+		else{session.removeAttribute(EmailOwnershipProof.ATTRIBUTE);}
 		session.setAttribute(SessionMetadata.ATTRIBUTE, metadata);
 		session.setMaxInactiveInterval(Math.max(1, policy.remainingSeconds(metadata)));
 		var context = SecurityContextHolder.createEmptyContext();
