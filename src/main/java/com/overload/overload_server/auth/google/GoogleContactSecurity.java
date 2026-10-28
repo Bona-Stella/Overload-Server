@@ -20,8 +20,10 @@ final class GoogleContactSecurity extends GoogleBoundOidcSecurity {
 	static final String START="/oauth2/contact/google";
 	static final String CALLBACK="/login/oauth2/code/google-contact";
 	static final String FAILURE="/auth/google/contact/failure";
-	GoogleContactSecurity(ClientRegistrationRepository clients,GoogleContactRequests pending,SessionReauthentication sessions){super(clients,pending,sessions,START,CALLBACK,FAILURE,"google-contact");}
-	@Override protected String successPath(){return "/api/v1/auth/reauth/email/contact";}
+	private final GoogleFrontendReturn frontend;
+	GoogleContactSecurity(ClientRegistrationRepository clients,GoogleContactRequests pending,SessionReauthentication sessions,GoogleFrontendReturn frontend){super(clients,pending,sessions,START,CALLBACK,FAILURE,"google-contact");this.frontend=frontend;}
+	@Override protected String successPath(){return frontend.contactSuccess();}
+	@Override protected String failurePath(){return frontend.contactFailure();}
 	@Override protected void customize(OAuth2AuthorizationRequest.Builder builder){/* Standard openid/email scope; no auth_time or max_age claim. */}
 	@Override protected JwtDecoderFactory<ClientRegistration> decoders(){
 		var factory=new OidcIdTokenDecoderFactory();

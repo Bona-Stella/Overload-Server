@@ -140,3 +140,9 @@ Google auth_time 재인증 시작/콜백은 503이다. `GOOGLE_REAUTH_ENABLED` �
 자동화는 격리 PostgreSQL Testcontainers·루프백 서명 OIDC 서버·fake sender를 사용한다.
 이번 V6는 개발 DB에 적용하지 않았다. 실제 callback 등록/Google 동의·클레임/메일 전달은 후속 승인 LIVE가 필요하다.
 구체적 결과는 [공통 이메일 검증 보고서](../tasks/task-007-1c-3b-common-email-validation-report.md)를 따른다.
+
+Task 007-1D-2A의 React `/account`에서 이 조회·등록·재인증 계약을 사용한다.
+CONTACT만 선택적 `AUTH_CONTACT_FRONTEND_RETURN_URI`로 고정 React 복귀를 지원한다.
+빈 기본값·POST/CSRF·신원/후보/세션·실제 OTP 소유 증명과 90일 만료 계약은 유지한다.
+세부 설정은 [Google OIDC 문서](google-oidc.md), UI·테스트 범위는
+[프론트 인증 문서](../../../overload-pwa/docs/engineering/authentication.md)를 따른다.

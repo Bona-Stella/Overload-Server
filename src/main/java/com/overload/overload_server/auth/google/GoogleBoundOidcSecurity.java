@@ -50,6 +50,7 @@ abstract class GoogleBoundOidcSecurity {
 	protected abstract org.springframework.security.oauth2.jwt.JwtDecoderFactory<ClientRegistration> decoders();
 	protected abstract void customize(OAuth2AuthorizationRequest.Builder builder);
 	protected String successPath(){return "/api/v1/auth/session";}
+	protected String failurePath(){return FAILURE;}
 	protected boolean handleFailure(HttpServletResponse response,RuntimeException failure)throws IOException{return false;}
 	protected UUID selectedIdentity(HttpServletRequest request){
 		if(request.getParameterMap().keySet().stream().anyMatch(key->!key.equals("identityId")&&!key.equals("_csrf"))){throw new IllegalArgumentException("Unexpected field");}
@@ -146,11 +147,11 @@ abstract class GoogleBoundOidcSecurity {
 		else { SecurityContextHolder.clearContext(); }
 	}
 	private void fail(HttpServletRequest request, HttpServletResponse response,RuntimeException failure)throws IOException {
-		restore(request);if(!handleFailure(response,failure)){redirect(request,response,FAILURE);}
+		restore(request);if(!handleFailure(response,failure)){redirect(request,response,failurePath());}
 	}
 	private static void redirect(HttpServletRequest request, HttpServletResponse response, String path) {
 		response.setHeader("Cache-Control", "no-store"); response.setHeader("Referrer-Policy", "no-referrer");
-		response.setStatus(302); response.setHeader("Location", request.getContextPath() + path);
+		response.setStatus(302); response.setHeader("Location", path.startsWith("/") ? request.getContextPath() + path : path);
 	}
 	protected static void error(HttpServletResponse response, int status, String code) throws IOException {
 		response.setStatus(status); response.setContentType("application/json"); response.getWriter().write("{\"code\":\"" + code + "\"}");

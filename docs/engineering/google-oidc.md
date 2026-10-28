@@ -160,6 +160,25 @@ PWA는 localhost:3000의 Vite 프록시로 시작하지만 기존 공식 LOGIN �
 고정 URI·주입/미승인 경로 거부는 단위 테스트, 성공/실패 콜백과 JDBC 복원은 실제 PostgreSQL Testcontainers와 서명된 테스트 OIDC로 검증했다.
 프론트 연동/브라우저 범위는 [007-1D-1 보고서](../../../overload-pwa/docs/tasks/task-007-1d-1-validation-report.md)를 따른다.
 
+### Task 007-1D-2A: CONTACT 전용 선택적 PWA 복귀
+
+`AUTH_CONTACT_FRONTEND_RETURN_URI`는 LOGIN의 `AUTH_FRONTEND_RETURN_URI`와 독립적이다.
+빈 기본값은 기존 성공 `/api/v1/auth/reauth/email/contact`, 실패 `/auth/google/contact/failure`를 보존한다.
+local에서는 `http://localhost:3000/account/contact/complete`만 허용하며 실패는 같은 origin의 `/account/contact/failed`다.
+비로컬 또는 production 혼합 프로필에서는 운영자가 명시한 HTTPS origin의 같은 고정 경로/기본 HTTPS 포트만 허용한다.
+기존 LOGIN과 같은 검증을 공유하여 userinfo/query/fragment/제어문자/다른 경로/포트/인코딩 경로 변형을 거절한다.
+요청 Host/next/returnUrl을 사용하지 않고 토큰/code/state/email/sub를 복귀 URI에 넣지 않는다.
+
+변경은 CONTACT 성공·실패의 목적지뿐이다. POST 시작·CSRF·원본 세션/identity 바인딩·서명/nonce/state/PKCE 검증과
+후보 생성 경계는 그대로다. LOGIN/LINK/기본 비활성 REAUTH의 복귀 계약은 변경하지 않았다.
+React는 복귀 후 서버 contact 상태를 재조회하며, 후보 확인만으로 VERIFIED나 최근 이메일 소유 증명을 표시하지 않는다.
+기존 Google Console CONTACT 콜백 localhost:8080은 그대로이며 React 복귀 경로로 대신 등록하지 않는다.
+실제 `.env`는 수정하지 않았고 후속 LIVE 시 해당 프로세스에만 설정해 검증한다.
+
+기본 계약 회귀 테스트에는 빈 CONTACT 복귀 인자를 명시해 향후 로컬 설정과 격리했다.
+검증은 PostgreSQL 18.6 Testcontainers·서명된 테스트 OIDC·fake sender로 수행했으며 실제 계정/메일을 사용하지 않았다.
+프론트 범위와 결과는 [1D-2A 보고서](../../../overload-pwa/docs/tasks/task-007-1d-2a-validation-report.md)를 따른다.
+
 기존 OIDC 공식 근거:
 
 - [Spring OAuth2 Login 구성](https://docs.spring.io/spring-security/reference/servlet/oauth2/login/advanced.html)

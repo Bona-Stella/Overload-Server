@@ -11,6 +11,8 @@ class GoogleFrontendReturnTests {
         var target = new GoogleFrontendReturn(new MockEnvironment());
         assertThat(target.success()).isEqualTo("/api/v1/auth/session");
         assertThat(target.failure()).isEqualTo("/auth/google/failure");
+        assertThat(target.contactSuccess()).isEqualTo("/api/v1/auth/reauth/email/contact");
+        assertThat(target.contactFailure()).isEqualTo("/auth/google/contact/failure");
     }
     @Test void localUsesOnlyFixedFrontendRoutes() {
         var env = new MockEnvironment().withProperty("AUTH_FRONTEND_RETURN_URI", GoogleFrontendReturn.LOCAL);
@@ -34,5 +36,27 @@ class GoogleFrontendReturnTests {
     void productionRejectsUnsafeOrNonFixedConfiguration(String value) {
         var env = new MockEnvironment().withProperty("AUTH_FRONTEND_RETURN_URI", value);
         assertThatThrownBy(() -> new GoogleFrontendReturn(env)).isInstanceOf(IllegalStateException.class);
+    }
+    @Test void contactIsIndependentAndUsesItsOwnFixedRoutes() {
+        var env = new MockEnvironment().withProperty("AUTH_CONTACT_FRONTEND_RETURN_URI", "http://localhost:3000/account/contact/complete");
+        env.setActiveProfiles("local");
+        var target = new GoogleFrontendReturn(env);
+        assertThat(target.success()).isEqualTo("/api/v1/auth/session");
+        assertThat(target.contactSuccess()).isEqualTo("http://localhost:3000/account/contact/complete");
+        assertThat(target.contactFailure()).isEqualTo("http://localhost:3000/account/contact/failed");
+        env.setProperty("AUTH_CONTACT_FRONTEND_RETURN_URI", ""); env.setProperty("AUTH_FRONTEND_RETURN_URI", GoogleFrontendReturn.LOCAL);
+        assertThat(new GoogleFrontendReturn(env).contactSuccess()).isEqualTo("/api/v1/auth/reauth/email/contact");
+    }
+    @ParameterizedTest @ValueSource(strings = {"/account/contact/complete", "//evil.example/account/contact/complete", "http://localhost:3001/account/contact/complete", "http://127.0.0.1:3000/account/contact/complete", "http://localhost:3000/auth/complete", "http://localhost:3000/account/contact/complete?next=external", "http://localhost:3000/account/contact/complete#token", "http://user@localhost:3000/account/contact/complete", "http://localhost:3000/account/contact/%63omplete", "http://localhost:3000/account/../account/contact/complete", "http://localhost:3000/account/contact/complete\r\nX-Injected:yes"})
+    void contactRejectsNonFixedLocalDestinations(String value) {
+        var env = new MockEnvironment().withProperty("AUTH_CONTACT_FRONTEND_RETURN_URI", value); env.setActiveProfiles("local");
+        assertThatThrownBy(() -> new GoogleFrontendReturn(env)).isInstanceOf(IllegalStateException.class).hasMessageNotContaining(value);
+    }
+    @Test void contactProductionAndMixedProfilesRequireExplicitHttps() {
+        var env = new MockEnvironment().withProperty("AUTH_CONTACT_FRONTEND_RETURN_URI", "http://localhost:3000/account/contact/complete");
+        env.setActiveProfiles("local", "production");
+        assertThatThrownBy(() -> new GoogleFrontendReturn(env)).isInstanceOf(IllegalStateException.class);
+        env.setProperty("AUTH_CONTACT_FRONTEND_RETURN_URI", "https://frontend.example.test/account/contact/complete");
+        assertThat(new GoogleFrontendReturn(env).contactFailure()).isEqualTo("https://frontend.example.test/account/contact/failed");
     }
 }
