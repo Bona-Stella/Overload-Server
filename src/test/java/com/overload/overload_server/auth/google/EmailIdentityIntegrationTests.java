@@ -45,7 +45,7 @@ class EmailIdentityIntegrationTests {
     static void boot(boolean google){
         app=new SpringApplicationBuilder(OverloadServerApplication.class,EmailOtpFixtures.class,GoogleOidcFixtures.class,EmailIdentityFixtures.class)
                 .web(WebApplicationType.SERVLET).run("--spring.profiles.active=local,integration","--spring.datasource.url="+POSTGRES.getJdbcUrl(),
-                        "--spring.datasource.username="+POSTGRES.getUsername(),"--spring.datasource.password="+POSTGRES.getPassword(),"--GOOGLE_OIDC_ENABLED="+google,
+                        "--spring.datasource.username="+POSTGRES.getUsername(),"--spring.datasource.password="+POSTGRES.getPassword(),"--GOOGLE_OIDC_ENABLED="+google,"--AUTH_FRONTEND_RETURN_URI=",
                         "--GOOGLE_REAUTH_ENABLED=false","--OTP_EMAIL_ENABLED=false","--OTP_HMAC_KEY="+key,"--GOOGLE_CLIENT_ID="+provider.clientId,
                         "--GOOGLE_CLIENT_SECRET="+provider.clientSecret,"--server.address=127.0.0.1","--server.port=0","--spring.session.jdbc.cleanup-cron=-",
                         "--logging.level.root=WARN","--spring.main.banner-mode=off");

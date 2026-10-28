@@ -74,12 +74,15 @@ class GoogleOidcIntegrationTests {
 	}
 
 	static void startApplication(boolean enabled, int port) {
+		startApplication(enabled, port, "");
+	}
+	static void startApplication(boolean enabled, int port, String frontend) {
 		var sources = enabled ? new Class<?>[]{OverloadServerApplication.class, EmailOtpFixtures.class, GoogleOidcFixtures.class}
 				: new Class<?>[]{OverloadServerApplication.class, EmailOtpFixtures.class};
 		application = new SpringApplicationBuilder(sources).web(WebApplicationType.SERVLET)
 				.run("--spring.profiles.active=local,integration", "--spring.datasource.url=" + POSTGRES.getJdbcUrl(),
 						"--spring.datasource.username=" + POSTGRES.getUsername(), "--spring.datasource.password=" + POSTGRES.getPassword(),
-						"--GOOGLE_OIDC_ENABLED=" + enabled, "--OTP_EMAIL_ENABLED=false", "--OTP_HMAC_KEY=" + HMAC,
+						"--GOOGLE_OIDC_ENABLED=" + enabled, "--OTP_EMAIL_ENABLED=false", "--OTP_HMAC_KEY=" + HMAC, "--AUTH_FRONTEND_RETURN_URI=" + frontend,
 						// Ephemeral credentials are accepted only by the loopback mock, never written to .env.
 						"--GOOGLE_CLIENT_ID=" + provider.clientId, "--GOOGLE_CLIENT_SECRET=" + provider.clientSecret,
 						"--server.address=127.0.0.1", "--server.port=" + port, "--spring.session.jdbc.cleanup-cron=-",
@@ -100,6 +103,35 @@ class GoogleOidcIntegrationTests {
 				"exercise_definitions", "user_workout_settings", "auth_identities", "users")) { jdbc.update("DELETE FROM " + table); }
 		application.getBean(EmailOtpFixtures.FakeSender.class).reset();
 		browser = new Browser();
+	}
+
+	@Test
+	void optInFrontendReturnUsesFixedRoutesAndRestoresTheSameJdbcPrincipal() throws Exception {
+		int port = URI.create(base).getPort(); application.close(); startApplication(true, port, GoogleFrontendReturn.LOCAL);
+		try {
+			var flow = begin(browser);
+			var callback = complete(browser, flow);
+			assertThat(callback.statusCode()).isEqualTo(302);
+			assertThat(callback.headers().firstValue("Location")).contains(GoogleFrontendReturn.LOCAL);
+			assertThat(callback.headers().firstValue("Referrer-Policy")).contains("no-referrer");
+			UUID id = userId(browser);
+			assertThat(userId(browser)).isEqualTo(id);
+			assertThat(count("SELECT count(*) FROM users")).isEqualTo(1);
+			assertNoProviderStorage();
+		} finally { application.close(); startApplication(true, port); }
+	}
+
+	@Test
+	void optInFailureNeverReflectsRequestReturnUrlsOrCreatesAnAuthenticatedSession() throws Exception {
+		int port = URI.create(base).getPort(); application.close(); startApplication(true, port, GoogleFrontendReturn.LOCAL);
+		try {
+			var flow = begin(browser);
+			String state = MockProvider.parameters(flow.callback.getRawQuery()).get("state");
+			var callback = get(browser, "/login/oauth2/code/google?error=access_denied&state=" + MockProvider.encode(state) + "&next=https://evil.example&returnUrl=https://evil.example");
+			assertThat(callback.statusCode()).isEqualTo(302);
+			assertThat(callback.headers().firstValue("Location")).contains("http://localhost:3000/auth/failed");
+			assertAnonymousAndNoAccount(browser);
+		} finally { application.close(); startApplication(true, port); }
 	}
 
 	@AfterEach

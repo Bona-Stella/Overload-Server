@@ -60,7 +60,7 @@ class GoogleReauthenticationIntegrationTests {
 		app = new SpringApplicationBuilder(OverloadServerApplication.class, EmailOtpFixtures.class, GoogleOidcFixtures.class, GoogleReauthenticationFixtures.class)
 				.web(WebApplicationType.SERVLET).run("--spring.profiles.active=local,integration",
 						"--spring.datasource.url=" + POSTGRES.getJdbcUrl(), "--spring.datasource.username=" + POSTGRES.getUsername(),
-						"--spring.datasource.password=" + POSTGRES.getPassword(), "--GOOGLE_OIDC_ENABLED=true", "--GOOGLE_REAUTH_ENABLED=true", "--OTP_EMAIL_ENABLED=false",
+						"--spring.datasource.password=" + POSTGRES.getPassword(), "--GOOGLE_OIDC_ENABLED=true", "--AUTH_FRONTEND_RETURN_URI=", "--GOOGLE_REAUTH_ENABLED=true", "--OTP_EMAIL_ENABLED=false",
 						"--GOOGLE_CLIENT_ID=" + provider.clientId, "--GOOGLE_CLIENT_SECRET=" + provider.clientSecret, "--OTP_HMAC_KEY=" + HMAC,
 						"--server.address=127.0.0.1", "--server.port=" + port, "--spring.session.jdbc.cleanup-cron=-",
 						"--spring.datasource.hikari.maximum-pool-size=2", "--spring.datasource.hikari.minimum-idle=1",

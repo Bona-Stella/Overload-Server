@@ -63,10 +63,11 @@ public class GoogleOidcSecurity {
 	private final org.springframework.beans.factory.ObjectProvider<GoogleReauthenticationSecurity> reauthentication;
 	private final GoogleContactSecurity contact;
 	private final GoogleLinkSecurity linking;
+	private final GoogleFrontendReturn frontend;
 
 	public GoogleOidcSecurity(ClientRegistrationRepository clients, JdbcTemplate jdbc, PlatformTransactionManager manager,
 			SessionRepository<? extends Session> repository, AccountProvisioningService accounts, VerifiedSessionLogin sessions,
-			@Qualifier("googleTokenHttpClient") HttpClient tokenHttpClient, org.springframework.beans.factory.ObjectProvider<GoogleReauthenticationSecurity> reauthentication, GoogleContactSecurity contact,GoogleLinkSecurity linking) {
+			@Qualifier("googleTokenHttpClient") HttpClient tokenHttpClient, org.springframework.beans.factory.ObjectProvider<GoogleReauthenticationSecurity> reauthentication, GoogleContactSecurity contact,GoogleLinkSecurity linking, GoogleFrontendReturn frontend) {
 		this.clients = clients;
 		this.pending = new JdbcAuthorizationRequestRepository(jdbc, manager, repository);
 		this.accounts = accounts;
@@ -75,6 +76,7 @@ public class GoogleOidcSecurity {
 		this.reauthentication = reauthentication;
 		this.contact=contact;
 		this.linking=linking;
+		this.frontend=frontend;
 	}
 
 	public void configure(HttpSecurity http) throws Exception {
@@ -127,7 +129,7 @@ public class GoogleOidcSecurity {
 						SecurityContextHolder.clearContext();
 						var account = accounts.provision(identity, null);
 						sessions.establish(request, response, account.id());
-						redirect(request, response, "/api/v1/auth/session");
+						redirect(request, response, frontend.success());
 					} catch (RuntimeException exception) {
 						fail(request, response);
 					}
@@ -167,10 +169,10 @@ public class GoogleOidcSecurity {
 		response.setHeader("Cache-Control", "no-store");
 		response.setHeader("Referrer-Policy", "no-referrer");
 		response.setStatus(302);
-		response.setHeader("Location", request.getContextPath() + path);
+		response.setHeader("Location", path.startsWith("/") ? request.getContextPath() + path : path);
 	}
 
-	private static void fail(HttpServletRequest request, HttpServletResponse response) {
+	private void fail(HttpServletRequest request, HttpServletResponse response) {
 		SecurityContextHolder.clearContext();
 		try {
 			if (request.getSession(false) != null) {
@@ -179,10 +181,10 @@ public class GoogleOidcSecurity {
 		} catch (RuntimeException cleanupFailure) {
 			// Store failure must not turn into a success redirect or leak provider/request details.
 		}
-		redirect(request, response, FAILURE);
+		redirect(request, response, frontend.failure());
 	}
 
-	private static final class BrowserBoundary extends OncePerRequestFilter {
+	private final class BrowserBoundary extends OncePerRequestFilter {
 		@Override
 		protected boolean shouldNotFilter(HttpServletRequest request) {
 			return !exactGet(request, START) && !exactGet(request, CALLBACK);

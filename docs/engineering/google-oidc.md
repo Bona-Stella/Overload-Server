@@ -137,7 +137,30 @@ PostgreSQL은 독립 Testcontainers 18.6이며 기존 Compose DB·실메일·개
 프론트 전환·iPhone/LAN HTTPS·운영 배포·계정 연결/해제·민감 업무 쓰기는 아직 구현하지 않았다.
 Google 재인증은 테스트 OIDC/PostgreSQL 검증과 실제 Google 재인증 검증을 구분한다.
 
-공식 근거:
+## Task 007-1D-1: 선택적 PWA 복귀
+
+기본 LOGIN 성공 `/api/v1/auth/session` 및 실패 `/auth/google/failure`는 유지한다.
+서버 소유 `AUTH_FRONTEND_RETURN_URI`가 비어 있으면 기존 LIVE 계약 그대로다.
+명시적으로 설정한 경우에만 성공은 이 고정 URI, 실패는 같은 origin의 `/auth/failed`로 이동한다.
+
+- local 전용 값: `http://localhost:3000/auth/complete` 정확히 하나.
+- 비로컬/혼합 production 프로필: 명시한 신뢰 가능한 HTTPS origin의 `/auth/complete`, 기본 HTTPS 포트만 허용한다.
+- userinfo·query·fragment·CRLF·다른 경로·상대/프로토콜 상대 URI·인코딩 경로 변형은 거절한다.
+- 요청 next/returnUrl·Host/forwarded header로 복귀 목적지를 만들지 않는다. 잘못된 설정 값 자체를 오류에 출력하지 않는다.
+- code/state/token은 복귀 URL에 포함하지 않는다. 기존 no-store/no-referrer 및 state/nonce/PKCE·JDBC 세션 검증은 유지한다.
+- CONTACT/LINK/조건부 REAUTH의 성공/실패 경로는 바꾸지 않는다. Google 강제 재인증은 계속 기본 비활성이다.
+
+PWA는 localhost:3000의 Vite 프록시로 시작하지만 기존 공식 LOGIN 콜백은 localhost:8080 그대로다.
+같은 localhost 호스트의 쿠키를 유지하며 localhost와 127.0.0.1/LAN IP를 섞지 않는다.
+운영은 같은 호스트 HTTPS 역방향 프록시 및 SPA 복귀 라우팅을 별도 구성/검증해야 한다.
+쿠키 Domain·CORS·HttpOnly/SameSite/Secure·90일 정책은 변경하지 않았다.
+실제 `.env`·개발 DB·V1~V8은 바꾸지 않았고 실서비스 인증·메일·운영 배포는 수행하지 않았다.
+
+기존 364개와 신규 24개를 합한 388개 테스트 및 `test integrationTest build`가 통과했다.
+고정 URI·주입/미승인 경로 거부는 단위 테스트, 성공/실패 콜백과 JDBC 복원은 실제 PostgreSQL Testcontainers와 서명된 테스트 OIDC로 검증했다.
+프론트 연동/브라우저 범위는 [007-1D-1 보고서](../../../overload-pwa/docs/tasks/task-007-1d-1-validation-report.md)를 따른다.
+
+기존 OIDC 공식 근거:
 
 - [Spring OAuth2 Login 구성](https://docs.spring.io/spring-security/reference/servlet/oauth2/login/advanced.html)
 - [Security 7.1.2 OAuth2 Login 필터](https://github.com/spring-projects/spring-security/blob/7.1.2/oauth2/oauth2-client/src/main/java/org/springframework/security/oauth2/client/web/OAuth2LoginAuthenticationFilter.java)
