@@ -2,7 +2,8 @@
 
 서버 측 Authorization Code + OIDC 로그인이다. 공식 Spring Security OAuth2 Client 7.1.2/Jose와
 Boot 4.1.2 BOM을 사용하며, JWT를 앱 인증 수단으로 발급하지 않는다. 기존 이메일 OTP·JDBC 세션을 유지한다.
-실제 Google 계정 브라우저 E2E는 아직 수행하지 않았다. 자동화는 루프백 OIDC 서버의 서명된 토큰과 실제 PostgreSQL로 수행한다.
+실제 Google 계정 브라우저 E2E는 별도 [3A-LIVE 보고서](../tasks/task-007-1c-3a-live-validation-report.md)에서 검증했다.
+이번 재인증 작업의 자동화는 루프백 OIDC 서버의 서명된 토큰과 실제 PostgreSQL을 사용하며 Google 실로그인을 반복하지 않는다.
 
 ## 로컬 설정·실행
 
@@ -108,7 +109,8 @@ Google access/ID/refresh token·OidcUser·OAuth2AuthenticationToken은 장기 �
 소비된 state/code를 재활성화하거나 계정/세션/외부 Google 교환을 하나의 트랜잭션이라고 취급하지 않는다.
 
 기존 최초 로그인 +90일 절대 만료·10분 재인증·쿠키 HttpOnly/SameSite/Secure·로그아웃/CSRF 갱신을 유지한다.
-이번 Google 로그인은 인증 수단 연결·민감 작업 재인증 API가 아니다. 그 기능은 007-1C-3B 후속 범위다.
+이번 Google 로그인은 인증 수단 연결·재인증 API가 아니다. 이메일 재인증은
+[007-1C-3B-1](email-reauthentication.md)로 추가했고, Google 재인증 및 수단 연결·해제는 후속 범위다.
 
 ## 검증·실로그인 구분
 
@@ -121,8 +123,8 @@ Mock 등록은 테스트의 루프백 authorization/token/JWKS와 임시 포트�
 PostgreSQL은 독립 Testcontainers 18.6이며 기존 Compose DB·실메일·개인 Google 계정은 사용하지 않는다.
 최종 개수·실패 수정·Git/정리 증거는 [검증 보고서](../tasks/task-007-1c-3a-validation-report.md)를 따른다.
 
-실제 Google Cloud 생성/활성 여부·Testing 사용자 등록·개인 브라우저 동의·실제 Google 네트워크 E2E는 별도로 확인해야 한다.
-프론트 전환·iPhone/LAN HTTPS·운영 배포·계정 연결/해제·실제 민감 작업 재인증은 아직 구현하지 않았다.
+기존 PC 브라우저 로그인은 3A-LIVE 결과와 구분하며 이번 자동화 결과로 실로그인을 새로 검증했다고 주장하지 않는다.
+프론트 전환·iPhone/LAN HTTPS·운영 배포·계정 연결/해제·Google 재인증·민감 업무 쓰기는 아직 구현하지 않았다.
 
 공식 근거:
 

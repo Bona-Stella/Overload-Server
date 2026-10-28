@@ -60,12 +60,12 @@ class PostgresMigrationTests {
 					"email_otp_login_claims", "email_otp_rate_limits", "exercise_definitions",
 					"flyway_schema_history", "spring_session", "spring_session_attributes", "user_workout_settings", "users");
 			assertThat(jdbc.queryForObject("SELECT count(*) FROM users", Integer.class)).isZero();
-			assertThat(flyway.info().current().getVersion().toString()).isEqualTo("4");
+			assertThat(flyway.info().current().getVersion().toString()).isEqualTo("5");
 			assertThat(flyway.getConfiguration().isCleanDisabled()).isTrue();
 			assertThat(flyway.getConfiguration().isBaselineOnMigrate()).isFalse();
 			flyway.validate();
 			history = jdbc.queryForList("SELECT * FROM flyway_schema_history ORDER BY installed_rank");
-			assertThat(history).hasSize(4);
+			assertThat(history).hasSize(5);
 			assertThat(history.getFirst()).containsEntry("version", "1")
 					.containsEntry("script", "V1__create_users.sql").containsEntry("success", true);
 			assertThat(history.get(1)).containsEntry("version", "2")
@@ -74,6 +74,8 @@ class PostgresMigrationTests {
 					.containsEntry("script", "V3__create_spring_session.sql").containsEntry("success", true);
 			assertThat(history.get(3)).containsEntry("version", "4")
 					.containsEntry("script", "V4__create_email_otp.sql").containsEntry("success", true);
+			assertThat(history.get(4)).containsEntry("version", "5")
+					.containsEntry("script", "V5__add_email_reauthentication.sql").containsEntry("success", true);
 			jdbc.update("INSERT INTO users (id) VALUES (?)", userId);
 			var user = jdbc.queryForMap("SELECT * FROM users WHERE id = ?", userId);
 			assertThat(user).containsEntry("id", userId).containsEntry("data_generation", 0L)
@@ -128,7 +130,7 @@ class PostgresMigrationTests {
 		var checksums = java.util.Arrays.stream(v2.info().applied()).map(info -> info.getChecksum()).toList();
 		try (var context = startApplication(WebApplicationType.NONE)) {
 			var latest = context.getBean(Flyway.class);
-			assertThat(latest.info().current().getVersion().toString()).isEqualTo("4");
+			assertThat(latest.info().current().getVersion().toString()).isEqualTo("5");
 			assertThat(java.util.Arrays.stream(latest.info().applied()).limit(2).map(info -> info.getChecksum()).toList())
 					.isEqualTo(checksums);
 			assertThat(latest.migrate().migrationsExecuted).isZero();
@@ -153,6 +155,45 @@ class PostgresMigrationTests {
 			assertThat(context.getBean(JdbcTemplate.class).queryForObject("SELECT data_generation FROM users WHERE id = ?",
 					Long.class, userId)).isEqualTo(11L);
 			assertThat(latest.migrate().migrationsExecuted).isZero();
+		}
+	}
+
+	@Test
+	void upgradesV4PreservingLoginStateCountersSessionBytesAndAllPriorChecksums() {
+		var old = Flyway.configure().dataSource(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword()).target("4").load();
+		old.migrate();
+		var checksums = java.util.Arrays.stream(old.info().applied()).map(info -> info.getChecksum()).toList();
+		var dataSource = new org.springframework.jdbc.datasource.DriverManagerDataSource(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword());
+		var jdbc = new JdbcTemplate(dataSource);
+		var user = UUID.randomUUID(); var identity = UUID.randomUUID(); var challenge = UUID.randomUUID();
+		var primary = UUID.randomUUID().toString(); var session = UUID.randomUUID().toString(); var key = "a".repeat(64);
+		jdbc.update("INSERT INTO users (id,nickname,data_generation) VALUES (?,'preserved',7)", user);
+		jdbc.update("INSERT INTO auth_identities (id,user_id,provider,issuer,subject) VALUES (?,?,'email','overload:email','migration@example.test')", identity, user);
+		jdbc.update("INSERT INTO exercise_definitions (id,user_id,data_generation,name) VALUES (?,?,7,'preserved')", UUID.randomUUID(), user);
+		jdbc.update("INSERT INTO user_workout_settings (user_id,data_generation,rest_low_seconds,rest_medium_seconds,rest_high_seconds) VALUES (?,7,77,66,55)", user);
+		jdbc.update("INSERT INTO email_otp_limits (email_key,purpose,last_issued_at,failed_attempts,failure_window_end) VALUES (?,'LOGIN',CURRENT_TIMESTAMP,3,CURRENT_TIMESTAMP+INTERVAL '30 minutes')", key);
+		jdbc.update("""
+				INSERT INTO email_otp_challenges (id,email_key,purpose,recipient,binding_hash,verifier,state,issued_at,expires_at,accepted_at,failed_attempts)
+				VALUES (?,?,'LOGIN','migration@example.test',?,?,'ACTIVE',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP+INTERVAL '5 minutes',CURRENT_TIMESTAMP,2)
+				""", challenge, key, "b".repeat(64), new byte[32]);
+		jdbc.update("UPDATE email_otp_limits SET active_challenge_id=?", challenge);
+		jdbc.update("INSERT INTO email_otp_rate_limits VALUES (?,'LOGIN',CURRENT_TIMESTAMP,4)", "c".repeat(64));
+		jdbc.update("INSERT INTO spring_session VALUES (?,?,1,2,60,9999999999999,?)", primary, session, user.toString());
+		jdbc.update("INSERT INTO spring_session_attributes VALUES (?,'preserved',?)", primary, new byte[]{1,2,3});
+		var tables = List.of("users", "auth_identities", "exercise_definitions", "user_workout_settings", "email_otp_limits", "email_otp_rate_limits", "spring_session");
+		var snapshots = tables.stream().map(table -> jdbc.queryForList("SELECT * FROM " + table)).toList();
+		var bytes = jdbc.queryForObject("SELECT attribute_bytes FROM spring_session_attributes", byte[].class);
+		try (var context = startApplication(WebApplicationType.NONE)) {
+			var latest = context.getBean(Flyway.class);
+			assertThat(java.util.Arrays.stream(latest.info().applied()).limit(4).map(info -> info.getChecksum()).toList()).isEqualTo(checksums);
+			assertThat(tables.stream().map(table -> jdbc.queryForList("SELECT * FROM " + table)).toList()).isEqualTo(snapshots);
+			assertThat(jdbc.queryForObject("SELECT attribute_bytes FROM spring_session_attributes", byte[].class)).isEqualTo(bytes);
+			assertThat(jdbc.queryForMap("SELECT purpose,state,failed_attempts,reauth_user_id,reauth_identity_id FROM email_otp_challenges"))
+					.containsEntry("purpose", "LOGIN").containsEntry("state", "ACTIVE").containsEntry("failed_attempts", 2)
+					.containsEntry("reauth_user_id", null).containsEntry("reauth_identity_id", null);
+			assertThat(latest.migrate().migrationsExecuted).isZero();
+			assertThatThrownBy(() -> jdbc.update("UPDATE email_otp_challenges SET purpose='REAUTH' WHERE id=?", challenge))
+					.isInstanceOf(DataIntegrityViolationException.class);
 		}
 	}
 

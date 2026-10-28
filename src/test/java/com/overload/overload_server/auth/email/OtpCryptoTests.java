@@ -18,6 +18,22 @@ class OtpCryptoTests {
 	}
 
 	@Test
+	void reauthenticationVerifierBindsPurposeAndSessionWhileLoginKeepsV4Bytes() throws Exception {
+		var key = randomKey(); var crypto = new OtpCrypto(key); var id = UUID.randomUUID();
+		var mac = javax.crypto.Mac.getInstance("HmacSHA256");
+		mac.init(new javax.crypto.spec.SecretKeySpec(Base64.getDecoder().decode(key), "HmacSHA256"));
+		for (var field : java.util.List.of("overload-otp-v1", "LOGIN", "a@example.test", id.toString(), "000007")) {
+			var bytes = field.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+			mac.update(java.nio.ByteBuffer.allocate(4).putInt(bytes.length).array()); mac.update(bytes);
+		}
+		var legacy = mac.doFinal();
+		assertThat(MessageDigest.isEqual(legacy, crypto.verifier("a@example.test", id, "000007"))).isTrue();
+		var reauth = crypto.verifier(OtpPurpose.REAUTH, "a@example.test", id, "000007", "session-a");
+		assertThat(MessageDigest.isEqual(legacy, reauth)).isFalse();
+		assertThat(MessageDigest.isEqual(reauth, crypto.verifier(OtpPurpose.REAUTH, "a@example.test", id, "000007", "session-b"))).isFalse();
+	}
+
+	@Test
 	void sixDigitsPreserveLeadingZeroAndUseTheWholeUniformBound() {
 		var crypto = new OtpCrypto(randomKey(), new SecureRandom() {
 			@Override public int nextInt(int bound) {

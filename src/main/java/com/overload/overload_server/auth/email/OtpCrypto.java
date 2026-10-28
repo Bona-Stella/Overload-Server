@@ -41,13 +41,20 @@ final class OtpCrypto {
 	}
 
 	byte[] verifier(String email, UUID issuance, String code) {
+		return verifier(OtpPurpose.LOGIN, email, issuance, code, null);
+	}
+
+	byte[] verifier(OtpPurpose purpose, String email, UUID issuance, String code, String bindingHash) {
 		if (!ready()) {
 			throw new OtpFailure(503, "OTP_UNAVAILABLE");
 		}
 		try {
 			var mac = Mac.getInstance("HmacSHA256");
 			mac.init(new SecretKeySpec(key, "HmacSHA256"));
-			for (var field : new String[]{"overload-otp-v1", "LOGIN", email, issuance.toString(), code}) {
+			var fields = new java.util.ArrayList<>(java.util.List.of("overload-otp-v1", purpose.name(), email, issuance.toString(), code));
+			// Preserve the exact V4 LOGIN HMAC format; REAUTH additionally authenticates the session/owner binding.
+			if (purpose == OtpPurpose.REAUTH) { fields.add(java.util.Objects.requireNonNull(bindingHash)); }
+			for (var field : fields) {
 				var bytes = field.getBytes(StandardCharsets.UTF_8);
 				mac.update(ByteBuffer.allocate(4).putInt(bytes.length).array());
 				mac.update(bytes);

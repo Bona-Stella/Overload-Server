@@ -114,7 +114,8 @@ public class SecurityConfiguration {
 						writeError(response, 401, "AUTHENTICATION_REQUIRED")).accessDeniedHandler(denied))
 				.logout(logout -> logout.logoutUrl("/api/v1/auth/logout")
 						.logoutSuccessHandler((request, response, authentication) -> response.setStatus(204)))
-				.addFilterAfter(new SessionExpiryFilter(policy), SecurityContextHolderFilter.class);
+				.addFilterAfter(new SessionExpiryFilter(policy), SecurityContextHolderFilter.class)
+				.addFilterAfter(new ReauthenticationResponseFilter(), SessionExpiryFilter.class);
 		var oidc = google.getIfAvailable();
 		if (oidc != null) {
 			oidc.configure(http);

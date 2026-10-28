@@ -3,7 +3,9 @@
 이메일 OTP 발급·검증·계정 프로비저닝·JDBC 인증 세션 경로를 구현했다.
 실메일은 기본 비활성화다. 1C-2 자동화는 fake sender와 로컬 Resend HTTP 스텁을 사용했고,
 후속 1C-2-LIVE에서 별도 승인한 실발송·수신·PostgreSQL 로그인을 검증했다.
-Google OIDC 서버는 [1C-3A](google-oidc.md)로 추가했다. 계정 연결/변경·민감 작업 재인증은 후속 범위다.
+Google OIDC 서버는 [1C-3A](google-oidc.md)로 추가했다. 인증된 사용자용 이메일 재인증은
+[1C-3B-1 별도 계약](email-reauthentication.md)을 따른다. 아래의 소비·프로비저닝 경계는 LOGIN 경로의 계약이다.
+계정 연결/변경·Google 재인증·실제 민감 업무 쓰기는 후속 범위다.
 
 ## HTTP 계약
 

@@ -20,6 +20,26 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class ResendOtpEmailSenderTests {
 
 	@Test
+	void reauthenticationMailHasDistinctIntentAndIdempotencyNamespace() throws Exception {
+		var server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+		var body = new AtomicReference<String>(); var key = new AtomicReference<String>();
+		server.createContext("/emails", exchange -> {
+			body.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+			key.set(exchange.getRequestHeaders().getFirst("Idempotency-Key"));
+			var result = "{\"id\":\"local-reauth\"}".getBytes(StandardCharsets.UTF_8);
+			exchange.sendResponseHeaders(200,result.length); exchange.getResponseBody().write(result); exchange.close();
+		});
+		server.start();
+		try (var client = HttpClient.newHttpClient()) {
+			var sender = new ResendOtpEmailSender(true, UUID.randomUUID().toString(), "sender@example.invalid", client, endpoint(server), Duration.ofSeconds(1));
+			var message = new OtpEmailSender.Message(UUID.randomUUID(), "recipient@example.invalid", "000007", OtpPurpose.REAUTH);
+			sender.send(message);
+			assertThat(key.get().equals("email-otp/reauth/" + message.issuanceId())).isTrue();
+			assertThat(body.get()).contains("이메일 재인증").doesNotContain("로그인 인증");
+		} finally { server.stop(0); }
+	}
+
+	@Test
 	void sendsStablePayloadAndIdempotencyKeyOnlyToTheLocalProtocolStub() throws Exception {
 		var server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
 		var calls = new AtomicInteger(); var firstBody = new AtomicReference<String>();

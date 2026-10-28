@@ -109,6 +109,29 @@ class GoogleOidcIntegrationTests {
 	static void stop() { if (application != null) { application.close(); } if (provider != null) { provider.close(); } }
 
 	@Test
+	void googleOnlyIdentityCannotRequestEmailReauthenticationOrBorrowAnOtpAccount() throws Exception {
+		assertSuccess(complete(browser, begin(browser)));
+		var google = stored(browser);
+		var metadata = (SessionMetadata) google.getAttribute(SessionMetadata.ATTRIBUTE);
+		var accounts = application.getBean(com.overload.overload_server.account.AccountProvisioningService.class);
+		var email = accounts.provision(com.overload.overload_server.account.VerifiedIdentity.email(provider.email), null);
+		var ownId = jdbc.queryForObject("SELECT id FROM auth_identities WHERE user_id=?", UUID.class, metadata.userId());
+		var foreignId = jdbc.queryForObject("SELECT id FROM auth_identities WHERE user_id=?", UUID.class, email.id());
+		var identities = get(browser, "/api/v1/auth/identities");
+		assertThat(identities.statusCode()).isEqualTo(200);
+		assertThat(identities.body()).contains("google", ownId.toString()).doesNotContain("@", provider.subject, foreignId.toString());
+		for (var identity : List.of(ownId, foreignId)) {
+			assertThat(post(browser, "/api/v1/auth/reauth/email/request", Map.of("identityId", identity), csrf(browser)).statusCode()).isEqualTo(404);
+			assertThat(post(browser, "/api/v1/auth/reauth/email/verify", Map.of("identityId", identity,
+					"challengeId", UUID.randomUUID(), "code", "000007"), csrf(browser)).statusCode()).isEqualTo(404);
+		}
+		assertThat(application.getBean(EmailOtpFixtures.FakeSender.class).messages).isEmpty();
+		assertThat(count("SELECT count(*) FROM users")).isEqualTo(2);
+		assertThat(metadata.userId().equals(email.id())).isFalse();
+		assertThat(metadata.absoluteExpiresAt()).isEqualTo(((SessionMetadata) stored(browser).getAttribute(SessionMetadata.ATTRIBUTE)).absoluteExpiresAt());
+	}
+
+	@Test
 	void signedCodeFlowCreatesAccountAndDurableOwnPrincipalThenRestoresItOnTheNextRequest() throws Exception {
 		assertThat(get(browser, "/api/v1/auth/session").statusCode()).isEqualTo(401);
 		assertThat(get(browser, "/login").statusCode()).isEqualTo(401);

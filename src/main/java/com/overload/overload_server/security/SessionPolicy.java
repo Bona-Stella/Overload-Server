@@ -26,6 +26,10 @@ public class SessionPolicy {
 		if (session == null || !(session.getAttribute(SessionMetadata.ATTRIBUTE) instanceof SessionMetadata metadata)) {
 			return Optional.empty();
 		}
+		return isActive(metadata) ? Optional.of(metadata) : Optional.empty();
+	}
+
+	public boolean isActive(SessionMetadata metadata) {
 		var now = now();
 		if (metadata.userId() == null || metadata.loginStartedAt() == null || metadata.absoluteExpiresAt() == null
 				|| metadata.reauthenticatedAt() == null
@@ -34,9 +38,9 @@ public class SessionPolicy {
 				|| !now.isBefore(metadata.absoluteExpiresAt())
 				|| metadata.reauthenticatedAt().isBefore(metadata.loginStartedAt())
 				|| metadata.reauthenticatedAt().isAfter(now)) {
-			return Optional.empty();
+			return false;
 		}
-		return Optional.of(metadata);
+		return true;
 	}
 
 	public boolean hasRecentReauthentication(HttpSession session) {

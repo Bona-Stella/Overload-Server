@@ -2,7 +2,7 @@
 
 현재 단계는 Spring Security 7.1.2 / Spring Session JDBC 4.1.1 기반이다. Boot 4.1.2 BOM으로
 관리한다. 이메일 OTP는 [007-1C-2](email-otp.md), Google OIDC는 [007-1C-3A](google-oidc.md)로 추가했다.
-민감 작업 재인증 API는 아직 없다. `VerifiedIdentity` 생성은
+[007-1C-3B-1](email-reauthentication.md)에 인증 수단 조회와 이메일 재인증을 추가했다. 실제 민감 업무 쓰기 API는 아직 없다. `VerifiedIdentity` 생성은
 인증 성공이 아니다. 후속 검증 코드가 계정 프로비저닝을 완료한 뒤 검증된 계정 UUID만
 `AuthenticationSessionService.establishAfterVerification`에 전달해야 한다.
 Google/이메일 자동 병합 금지와 기존 seed 정책은 [계정 계약](account-provisioning.md)을 유지한다.

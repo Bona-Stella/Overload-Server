@@ -9,7 +9,7 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 import java.util.Map;
 
-@RestControllerAdvice(assignableTypes = EmailOtpController.class)
+@RestControllerAdvice(assignableTypes = {EmailOtpController.class, EmailReauthenticationController.class})
 public class EmailOtpErrors {
 
 	@ExceptionHandler(OtpFailure.class)
@@ -24,6 +24,11 @@ public class EmailOtpErrors {
 	@ExceptionHandler(DataAccessException.class)
 	ResponseEntity<Map<String, String>> databaseUnavailable() {
 		return failure(new OtpFailure(503, "OTP_UNAVAILABLE"));
+	}
+
+	@ExceptionHandler(com.overload.overload_server.security.SessionReauthentication.SessionChanged.class)
+	ResponseEntity<Map<String, String>> sessionChanged() {
+		return failure(new OtpFailure(401, "AUTHENTICATION_REQUIRED"));
 	}
 
 	@ExceptionHandler(HttpMessageNotReadableException.class)
