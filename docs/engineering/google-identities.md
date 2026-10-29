@@ -115,3 +115,28 @@ http://localhost:8080/login/oauth2/code/google-link
 이번에는 Console/실제 Google/Resend/개발 DB에 접근·마이그레이션하지 않았다. V8은 Testcontainers에서만 적용했다.
 실제 계정 선택/동의·다중 신원·브라우저 동일 세션·메일 proof의 시간과 해제 동작은 후속 승인 LIVE 검증이다.
 실제 결과와 자동화를 혼동하지 않는다. [검증 보고서](../tasks/task-007-1c-3b-3b-validation-report.md)를 참고한다.
+
+## Task 007-1D-2B: 선택적 React LINK 복귀
+
+서버 소유 `AUTH_LINK_FRONTEND_RETURN_URI`의 기본값은 빈 값이다. 기존 성공 identities JSON 경로와
+실패 JSON/고정 failure 경로는 그대로 유지한다. LOGIN/CONTACT 설정과 독립적이다.
+local에서는 정확히 `http://localhost:3000/account/link/complete`만 허용한다.
+설정한 경우 성공은 이 URI, 일반 실패와 LINK 도메인 실패는 같은 origin의 `/account/link/failed`로 302 이동한다.
+실패 사유·identity·이메일·OAuth code/state/token을 URL에 넣지 않아 React는 구체적인 충돌/취소/만료 원인을 추정하지 않는다.
+비로컬/혼합 production 프로필은 명시한 HTTPS origin·기본 HTTPS 포트·같은 고정 경로만 허용한다.
+userinfo/query/fragment/CRLF·임의 포트·인코딩/상대 경로를 거부하고 Host/forwarded/next/returnUrl을 사용하지 않는다.
+
+수정은 목적지 선택뿐이며 원본 세션·정확한 proof·5분 Pending·10분 증명·해제 세대·OIDC 검증과 트랜잭션은 변경하지 않는다.
+LINK는 원래 UUID·90일 만료·proof·CSRF를 연장하거나 회전하지 않는다. 일반 Google REAUTH는 계속 기본 비활성이다.
+초기 인증/CSRF 필터의 401/403, 잘못된 form의 400, Google 비활성의 503은 기존 JSON 거절 계약이다.
+이 경우 브라우저에서 뒤로 돌아와 계정 상태를 재조회하며 POST나 OAuth를 자동 재실행하지 않는다.
+
+React는 callback 주소만으로 성공을 선언하지 않고 session/identities/contact를 다시 읽는다.
+기존 Google 신원이 있는 경우에도 현재 연결 상태만 안내하며 어떤 Google 계정이 새로 추가됐는지 추측하지 않는다.
+현재 API는 같은 provider의 복수 identity를 허용하지만 표시 정보는 UUID/provider뿐이다.
+UI는 해당 provider가 하나일 때만 해제 확인을 제공하며 복수 신원은 추가 안전 식별 계약 전까지 해제를 제한한다.
+
+후속 승인 LIVE에는 기존 LOGIN/CONTACT 콜백을 유지하고 Google Console에
+`http://localhost:8080/login/oauth2/code/google-link`를 추가 등록한다. React 복귀 URI로 대체하지 않는다.
+실제 `.env` 변경·개발 DB 접근·실 Google/Resend 요청은 이번 구현에서 수행하지 않았다.
+전체 결과는 [1D-2B 보고서](../../../overload-pwa/docs/tasks/task-007-1d-2b-validation-report.md)를 참고한다.

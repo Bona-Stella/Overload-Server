@@ -15,6 +15,8 @@ final class GoogleFrontendReturn {
     private final String failure;
     private final String contactSuccess;
     private final String contactFailure;
+    private final String linkSuccess;
+    private final String linkFailure;
 
     GoogleFrontendReturn(Environment environment) {
         String[] login = destination(environment, "AUTH_FRONTEND_RETURN_URI", "/auth/complete", "/auth/failed",
@@ -23,6 +25,9 @@ final class GoogleFrontendReturn {
         String[] contact = destination(environment, "AUTH_CONTACT_FRONTEND_RETURN_URI", "/account/contact/complete", "/account/contact/failed",
                 "/api/v1/auth/reauth/email/contact", "/auth/google/contact/failure");
         contactSuccess = contact[0]; contactFailure = contact[1];
+        String[] link = destination(environment, "AUTH_LINK_FRONTEND_RETURN_URI", "/account/link/complete", "/account/link/failed",
+                "/api/v1/auth/identities", "/auth/google/link/failure");
+        linkSuccess = link[0]; linkFailure = link[1];
     }
 
     private static String[] destination(Environment environment, String property, String path, String failed,
@@ -52,4 +57,7 @@ final class GoogleFrontendReturn {
     String failure() { return failure; }
     String contactSuccess() { return contactSuccess; }
     String contactFailure() { return contactFailure; }
+    String linkSuccess() { return linkSuccess; }
+    String linkFailure() { return linkFailure; }
+    boolean linkConfigured() { return !linkSuccess.startsWith("/"); }
 }

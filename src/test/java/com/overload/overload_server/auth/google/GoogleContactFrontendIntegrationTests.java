@@ -49,7 +49,7 @@ class GoogleContactFrontendIntegrationTests {
         app = new SpringApplicationBuilder(OverloadServerApplication.class, EmailOtpFixtures.class, GoogleOidcFixtures.class)
                 .web(WebApplicationType.SERVLET).run("--spring.profiles.active=local,integration", "--server.port=0", "--server.address=127.0.0.1",
                         "--spring.datasource.url=" + POSTGRES.getJdbcUrl(), "--spring.datasource.username=" + POSTGRES.getUsername(), "--spring.datasource.password=" + POSTGRES.getPassword(),
-                        "--GOOGLE_OIDC_ENABLED=true", "--GOOGLE_REAUTH_ENABLED=false", "--AUTH_FRONTEND_RETURN_URI=", "--AUTH_CONTACT_FRONTEND_RETURN_URI=" + SUCCESS,
+                        "--GOOGLE_OIDC_ENABLED=true", "--GOOGLE_REAUTH_ENABLED=false", "--AUTH_FRONTEND_RETURN_URI=", "--AUTH_LINK_FRONTEND_RETURN_URI=", "--AUTH_CONTACT_FRONTEND_RETURN_URI=" + SUCCESS,
                         "--OTP_EMAIL_ENABLED=false", "--OTP_HMAC_KEY=" + Base64.getEncoder().encodeToString(key),
                         "--GOOGLE_CLIENT_ID=" + provider.clientId, "--GOOGLE_CLIENT_SECRET=" + provider.clientSecret,
                         "--spring.session.jdbc.cleanup-cron=-", "--logging.level.root=WARN", "--spring.main.banner-mode=off");
