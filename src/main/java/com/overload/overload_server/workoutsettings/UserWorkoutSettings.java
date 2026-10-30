@@ -43,6 +43,16 @@ public class UserWorkoutSettings {
 	protected UserWorkoutSettings() {
 	}
 
+	public void changeRest(int low, int medium, int high, Instant now) {
+		var values = new com.overload.overload_server.account.WorkoutSettings(low, medium, high);
+		if (restLowSeconds != low || restMediumSeconds != medium || restHighSeconds != high) {
+			restLowSeconds = values.restLowSeconds();
+			restMediumSeconds = values.restMediumSeconds();
+			restHighSeconds = values.restHighSeconds();
+			updatedAt = now;
+		}
+	}
+
 	public UUID getUserId() { return userId; }
 	public long getDataGeneration() { return dataGeneration; }
 	public int getRestLowSeconds() { return restLowSeconds; }

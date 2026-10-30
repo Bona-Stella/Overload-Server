@@ -22,7 +22,8 @@ AI 코딩 에이전트와 개발자는 백엔드 코드의 생성, 수정,
 Task 007의 확정 정책과 구현 단계는 [Task 006 최종 설계 v0.3.1](../tasks/task-006-integrated-design-v0.3.1.md)을 따릅니다.
 운동 쓰기·진행 세션·복구는 [Task 009 v1.0](../tasks/task-009-redesign-v1.0.md)이 우선합니다.
 Task 006의 나머지 운동·인증 정책과 기존 Task 008 조회 계약은 유지합니다.
-현재 구조 정리 단계에서 신규 쓰기·세션·동기화 API는 구현하지 않았습니다.
+일반 온라인 종목 생성·이름 변경·휴식 설정 변경은 [온라인 쓰기 API 계약](../api/workout-online-write.md)을 따릅니다.
+루틴 쓰기·운동 세션·동기화 API는 미구현입니다.
 
 본 문서는 다음 항목에 집중합니다.
 
@@ -1222,7 +1223,7 @@ Tests
 - 중량 데이터의 정밀도 및 기술적 허용 범위
 - MVP 범위 밖 세트 유형과 PR의 후속 확장 기준
 - Cookie·CSRF·OIDC/OTP·배포 환경의 세부 구현 계약
-- 일반 온라인 쓰기 및 진행 세션 snapshot·finish·takeover의 경로/DTO와 epoch/revision 검사
+- 미구현 루틴 쓰기 및 진행 세션 snapshot·finish·takeover의 경로/DTO와 epoch/revision 검사
 - 소유권·세대 FK, 인덱스 및 집계 버전 증가의 구체적인 DDL·JPA 매핑
 - API 오류 응답의 최종 규약
 - 운영 환경별 백업·삭제 이력·멱등 정보의 구체적인 보존·파기 계약

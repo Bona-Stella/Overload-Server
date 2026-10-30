@@ -43,6 +43,24 @@ public class ExerciseDefinition {
 	protected ExerciseDefinition() {
 	}
 
+	public static ExerciseDefinition create(UUID id, UUID userId, long generation, String name, Instant now) {
+		var exercise = new ExerciseDefinition();
+		exercise.id = id;
+		exercise.userId = userId;
+		exercise.dataGeneration = generation;
+		exercise.name = name;
+		exercise.createdAt = now;
+		exercise.updatedAt = now;
+		return exercise;
+	}
+
+	public void rename(String name, Instant now) {
+		if (!this.name.equals(name)) {
+			this.name = name;
+			this.updatedAt = now;
+		}
+	}
+
 	public UUID getId() { return id; }
 	public UUID getUserId() { return userId; }
 	public long getDataGeneration() { return dataGeneration; }

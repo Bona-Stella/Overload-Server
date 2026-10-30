@@ -57,7 +57,7 @@ public class WorkoutReadErrors {
 				: response(500, "WORKOUT_DATA_READ_FAILED");
 	}
 
-	private static boolean unavailable(Throwable failure) {
+	static boolean unavailable(Throwable failure) {
 		// Includes transaction-begin connection failures; mapping/grammar/integrity errors stay 500.
 		var pending = new ArrayDeque<Throwable>();
 		var visited = Collections.newSetFromMap(new IdentityHashMap<Throwable, Boolean>());

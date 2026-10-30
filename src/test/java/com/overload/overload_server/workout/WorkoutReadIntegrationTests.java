@@ -292,9 +292,12 @@ class WorkoutReadIntegrationTests {
 	}
 
 	@Test void unsupportedMethodsRetain405RatherThanBecoming500() throws Exception {
-		var result = browser.send("POST", EXERCISES, "{}", browser.csrf());
+		// POST is now supported; PUT remains unsupported and must keep MVC's 405 boundary.
+		var token = browser.csrf();
+		var result = browser.send("PUT", EXERCISES, "{}", token);
 		assertThat(result.statusCode()).isEqualTo(405);
 		headers(result);
+		error(browser.send("POST", EXERCISES, "{}", token), 400, "INVALID_REQUEST");
 	}
 
 	Object snapshot() {

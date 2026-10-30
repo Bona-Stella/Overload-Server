@@ -10,4 +10,7 @@ import java.util.UUID;
 public interface UserWorkoutSettingsRepository extends Repository<UserWorkoutSettings, UUID> {
 
 	Optional<UserWorkoutSettings> findByUserIdAndDataGeneration(UUID userId, long dataGeneration);
+
+	@Transactional(transactionManager = "workoutTransactionManager")
+	void flush();
 }

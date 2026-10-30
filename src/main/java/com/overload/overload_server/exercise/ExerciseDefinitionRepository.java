@@ -12,4 +12,10 @@ public interface ExerciseDefinitionRepository extends Repository<ExerciseDefinit
 
 	List<ExerciseDefinition> findAllByUserIdAndDataGenerationOrderById(UUID userId, long dataGeneration);
 	Optional<ExerciseDefinition> findByIdAndUserIdAndDataGeneration(UUID id, UUID userId, long dataGeneration);
+
+	@Transactional(transactionManager = "workoutTransactionManager")
+	ExerciseDefinition saveAndFlush(ExerciseDefinition exercise);
+
+	@Transactional(transactionManager = "workoutTransactionManager")
+	void flush();
 }

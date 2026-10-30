@@ -261,7 +261,7 @@ Base URL:
 | GET | `/api/v1/statistics/progress` | 운동 기록 변화 조회 |
 | GET | `/api/v1/statistics/records` | 개인 최고 기록 조회 |
 
-> 위 목록에서 운동 종목 목록 GET만 구현됐으며 나머지는 초기 설계안입니다. 휴식 설정 GET `/api/v1/workout-settings`도 구현했습니다. 두 조회의 계약·검증은 [008-1A 보고서](docs/tasks/task-008-1a-workout-read-api-report.md)를 참고하세요. 인증은 기존 쿠키 세션 구현을 유지하며, 후속 쓰기 API는 별도 승인 계약을 따릅니다.
+> 운동 종목 목록 GET과 휴식 설정 GET `/api/v1/workout-settings`는 [008-1A 계약](docs/tasks/task-008-1a-workout-read-api-report.md)을 유지합니다. 일반 온라인 쓰기는 `POST /api/v1/exercises`, `PATCH /api/v1/exercises/{id}`, `PATCH /api/v1/workout-settings`를 제공합니다. 요청·응답·검증은 [온라인 쓰기 API 계약](docs/api/workout-online-write.md)을 따르며 기존 쿠키 세션·CSRF가 필요합니다. 나머지 위 목록은 초기 설계안이며 미구현입니다.
 
 ---
 
@@ -311,7 +311,7 @@ $env:JAVA_HOME = 'C:\path\to\jdk-25'
 다른 프로필은 표준 `SPRING_DATASOURCE_URL`·`SPRING_DATASOURCE_USERNAME`·`SPRING_DATASOURCE_PASSWORD`로 설정합니다.
 DB 없이 실행하는 앱 구성은 아닙니다. JPA는 기존 운동 종목·설정에 적용하며 Hibernate는 Flyway 스키마를 검증만 합니다.
 인증·계정·Spring Session JDBC는 유지합니다. 기본 HTTP 포트는 `8080`입니다.
-인증·계정 API와 운동 종목·휴식 설정 GET을 제공합니다. 운동 쓰기 API와 프론트엔드 조회 연동은 아직 구현하지 않았습니다.
+인증·계정 API, 운동 종목·휴식 설정 GET, 일반 온라인 종목 생성·이름 변경·휴식 설정 변경을 제공합니다. 프론트엔드 조회 연동은 별도 작업입니다.
 
 ### Health Check API (구현 완료)
 
@@ -357,7 +357,7 @@ Google 클라이언트 준비·정확한 localhost 콜백·활성화·세션 상
 
 현재 운동 쓰기·진행 세션·복구 기준은 [Task 009 v1.0](docs/tasks/task-009-redesign-v1.0.md)입니다.
 1차 구조 정리에서 구 명령 Controller·Service·Store·Codec·stamp·영수증/feed 런타임과 전용 테스트를 제거했습니다.
-기존 1B의 종목 생성·이름 변경·휴식 설정 변경은 새 일반 API 구현 전까지 **미구현**입니다.
+종목 생성·이름 변경·휴식 설정 변경은 범용 명령 없이 일반 Controller·Service·DTO와 기존 JPA 트랜잭션으로 구현했습니다. [온라인 쓰기 API 계약](docs/api/workout-online-write.md)을 참고하세요. 루틴 쓰기는 아직 미구현입니다.
 운동 세션 API·IndexedDB 동기화·설치형 PWA도 아직 제공하지 않습니다. 기존 인증·계정 seed·Task 008 조회는 유지합니다.
 V1~V9 Flyway 이력은 변경하지 않았습니다. 정식 V10은 폐기 stamp·receipt/feed 구조만 제거하며 기존 데이터·version/deleted_at을 보존합니다.
 V10 전체 회귀·실제 V8 백업의 격리 복원/업그레이드·승인된 개인 로컬 DB V8→V9→V10 적용 결과는 [V10 최종 보고서](docs/tasks/task-009-v10-local-application-report.md)를 참고하세요.
