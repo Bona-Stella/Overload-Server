@@ -5,13 +5,11 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import jakarta.persistence.Version;
-import org.hibernate.annotations.JdbcTypeCode;
-import org.hibernate.type.SqlTypes;
 
 import java.time.Instant;
 import java.util.UUID;
 
-/** Personal exercise with additive V9 concurrency metadata; never serialized as an API DTO. */
+/** Account-owned exercise; never serialized as an API DTO. */
 @Entity
 @Table(name = "exercise_definitions")
 public class ExerciseDefinition {
@@ -42,10 +40,6 @@ public class ExerciseDefinition {
 	@Column(name = "deleted_at")
 	private Instant deletedAt;
 
-	@JdbcTypeCode(SqlTypes.JSON)
-	@Column(name = "intent_stamps", nullable = false, columnDefinition = "jsonb")
-	private String intentStamps;
-
 	protected ExerciseDefinition() {
 	}
 
@@ -57,5 +51,4 @@ public class ExerciseDefinition {
 	public Instant getUpdatedAt() { return updatedAt; }
 	public Long getVersion() { return version; }
 	public Instant getDeletedAt() { return deletedAt; }
-	public String getIntentStamps() { return intentStamps; }
 }

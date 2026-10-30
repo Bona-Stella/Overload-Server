@@ -1,4 +1,4 @@
-package com.overload.overload_server.workoutcommand;
+package com.overload.overload_server.database;
 
 import com.overload.overload_server.OverloadServerApplication;
 import com.overload.overload_server.account.AccountProvisioningService;
@@ -25,7 +25,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 @Tag("postgres")
 @Testcontainers
-class WorkoutWriteUpgradeIntegrationTests {
+/** Applied Flyway history still needs an upgrade/data-preservation regression after runtime removal. */
+class V9MigrationCompatibilityTests {
 
 	@Container
 	final PostgreSQLContainer postgres = new PostgreSQLContainer("postgres:18.6-alpine")
@@ -64,7 +65,7 @@ class WorkoutWriteUpgradeIntegrationTests {
 			var mapped = app.getBean(ExerciseDefinitionRepository.class).findAllByUserIdAndDataGenerationOrderById(owner, generation);
 			assertThat(mapped).hasSize(2).allSatisfy(value -> {
 				assertThat(value.getName()).isEqualTo("  同名 벤치 Ω  ");
-				assertThat(value.getVersion()).isZero(); assertThat(value.getDeletedAt()).isNull(); assertThat(value.getIntentStamps()).isEqualTo("{}");
+				assertThat(value.getVersion()).isZero(); assertThat(value.getDeletedAt()).isNull();
 			});
 			assertThat(app.getBean(UserWorkoutSettingsRepository.class).findByUserIdAndDataGeneration(owner, generation).orElseThrow().getRestLowSeconds()).isEqualTo(17);
 			var provisioning = app.getBean(AccountProvisioningService.class);

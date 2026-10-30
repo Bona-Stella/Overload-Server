@@ -5,8 +5,6 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import jakarta.persistence.Version;
-import org.hibernate.annotations.JdbcTypeCode;
-import org.hibernate.type.SqlTypes;
 
 import java.time.Instant;
 import java.util.UUID;
@@ -42,10 +40,6 @@ public class UserWorkoutSettings {
 	@Column(name = "version", nullable = false)
 	private Long version;
 
-	@JdbcTypeCode(SqlTypes.JSON)
-	@Column(name = "intent_stamps", nullable = false, columnDefinition = "jsonb")
-	private String intentStamps;
-
 	protected UserWorkoutSettings() {
 	}
 
@@ -57,5 +51,4 @@ public class UserWorkoutSettings {
 	public Instant getCreatedAt() { return createdAt; }
 	public Instant getUpdatedAt() { return updatedAt; }
 	public Long getVersion() { return version; }
-	public String getIntentStamps() { return intentStamps; }
 }

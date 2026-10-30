@@ -353,10 +353,12 @@ Google 클라이언트 준비·정확한 localhost 콜백·활성화·세션 상
 운영 종목 20개와 휴식 구간, 신원/트랜잭션 계약 및 후속 연동 사항은
 [계정 프로비저닝 문서](docs/engineering/account-provisioning.md)를 참고합니다.
 
-Task 009-1A는 기존 인증·조회 계약을 유지하며 V9의 version·intent stamp·최종 영수증·revision/feed와
-엄격한 명령 DTO/문자열 수치/fingerprint 기반을 추가했습니다.
-검증 범위와 확정 형식은 [009-1A 보고서](docs/tasks/task-009-1a-write-foundation-report.md)를 참고하세요.
-명령 HTTP 실행·결과 조회·자동 충돌 해결·오프라인 UI는 후속 단계이며 아직 제공하지 않습니다.
+현재 운동 쓰기·진행 세션·복구 기준은 [Task 009 v1.0](docs/tasks/task-009-redesign-v1.0.md)입니다.
+1차 구조 정리에서 구 명령 Controller·Service·Store·Codec·stamp·영수증/feed 런타임과 전용 테스트를 제거했습니다.
+기존 1B의 종목 생성·이름 변경·휴식 설정 변경은 새 일반 API 구현 전까지 **미구현**입니다.
+운동 세션 API·IndexedDB 동기화·설치형 PWA도 아직 제공하지 않습니다. 기존 인증·계정 seed·Task 008 조회는 유지합니다.
+V1~V9 Flyway 이력은 변경하지 않았습니다. 남은 폐기 컬럼·테이블은 DB 상태/데이터 보존 확인과 승인 후 신규 마이그레이션으로 제거합니다.
+삭제 목록·DB 의존성과 검증 결과는 [1차 구조 정리 보고서](docs/tasks/task-009-phase-1-cleanup-report.md)를 참고하세요.
 
 ---
 

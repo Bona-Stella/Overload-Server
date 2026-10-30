@@ -1,5 +1,7 @@
 # Task 008-0B — 운동 도메인·외부 API 계약 v0.1
 
+> **현행 기준 변경 (2026-10-30):** 운동 쓰기·진행 세션·복구는 [Task 009 v1.0](task-009-redesign-v1.0.md)이 우선합니다. Task 008의 기존 조회(R-01~03)·공통 HTTP·JPA/JDBC 검증 경계는 유지합니다. 본문의 미구현 쓰기·명령/영수증/feed·Outbox·선택 복구 제안은 현재 구현 요구사항이 아닙니다. 새 쓰기·세션·IndexedDB 기능은 아직 미구현입니다.
+
 - 작성일: 2026-10-30 (Asia/Seoul)
 - 상태: **검토안 / API 미구현 / 새 기술 선택 승인 대기 / 후속 사용자 승인으로 문서만 로컬 Git 보관, Push 없음**
 - 기준: server `a8eccf9`, pwa `1c84d23`. JPA 설계만 `a8eccf9` (`docs: design JPA persistence for workout domain`)으로 보존했다.
