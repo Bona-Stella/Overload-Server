@@ -344,7 +344,7 @@ curl.exe -i -X POST http://localhost:8080/api/v1/health
 `--offline`은 Gradle 캐시가 준비된 경우에만 사용합니다.
 
 `test`는 DB 없이 컨텍스트 배선·Health MVC 계약, 신원 입력 계약과 운영 초기값·휴식 경계를 검증합니다.
-`integrationTest`는 일회성 PostgreSQL에서 V1→V2 마이그레이션·재시작·Health,
+`integrationTest`는 일회성 PostgreSQL에서 V1→V9 마이그레이션·재시작·Health,
 계정 원자적 생성·동시 요청·전체 롤백·소유권/세대 제약을 검증합니다.
 V3 세션 테이블·실제 HTTP/HTTPS 쿠키·CSRF·90일 절대 만료·10분 재인증 경계도 검증합니다.
 보안 응답과 프론트의 토큰 조회·갱신 계약은 [보안·세션 문서](docs/engineering/security-session.md)를 참고합니다.
@@ -352,6 +352,11 @@ V3 세션 테이블·실제 HTTP/HTTPS 쿠키·CSRF·90일 절대 만료·10분 
 Google 클라이언트 준비·정확한 localhost 콜백·활성화·세션 상태 조회는 [Google OIDC 문서](docs/engineering/google-oidc.md)를 따릅니다.
 운영 종목 20개와 휴식 구간, 신원/트랜잭션 계약 및 후속 연동 사항은
 [계정 프로비저닝 문서](docs/engineering/account-provisioning.md)를 참고합니다.
+
+Task 009-1A는 기존 인증·조회 계약을 유지하며 V9의 version·intent stamp·최종 영수증·revision/feed와
+엄격한 명령 DTO/문자열 수치/fingerprint 기반을 추가했습니다.
+검증 범위와 확정 형식은 [009-1A 보고서](docs/tasks/task-009-1a-write-foundation-report.md)를 참고하세요.
+명령 HTTP 실행·결과 조회·자동 충돌 해결·오프라인 UI는 후속 단계이며 아직 제공하지 않습니다.
 
 ---
 

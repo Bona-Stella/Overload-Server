@@ -58,14 +58,14 @@ class PostgresMigrationTests {
 					WHERE table_schema = 'public' ORDER BY table_name
 					""", String.class)).containsExactly("auth_identities", "email_otp_challenges", "email_otp_limits",
 					"email_otp_login_claims", "email_otp_rate_limits", "exercise_definitions",
-					"flyway_schema_history", "google_identity_change_versions", "reauth_email_candidates", "spring_session", "spring_session_attributes", "user_reauthentication_emails", "user_workout_settings", "users");
+					"flyway_schema_history", "google_identity_change_versions", "reauth_email_candidates", "spring_session", "spring_session_attributes", "sync_operations", "user_reauthentication_emails", "user_workout_settings", "users", "workout_change_batches", "workout_sync_state");
 			assertThat(jdbc.queryForObject("SELECT count(*) FROM users", Integer.class)).isZero();
-			assertThat(flyway.info().current().getVersion().toString()).isEqualTo("8");
+			assertThat(flyway.info().current().getVersion().toString()).isEqualTo("9");
 			assertThat(flyway.getConfiguration().isCleanDisabled()).isTrue();
 			assertThat(flyway.getConfiguration().isBaselineOnMigrate()).isFalse();
 			flyway.validate();
 			history = jdbc.queryForList("SELECT * FROM flyway_schema_history ORDER BY installed_rank");
-			assertThat(history).hasSize(8);
+			assertThat(history).hasSize(9);
 			assertThat(history.getFirst()).containsEntry("version", "1")
 					.containsEntry("script", "V1__create_users.sql").containsEntry("success", true);
 			assertThat(history.get(1)).containsEntry("version", "2")
@@ -79,6 +79,7 @@ class PostgresMigrationTests {
 			assertThat(history.get(5)).containsEntry("version","6").containsEntry("script","V6__add_reauthentication_emails.sql").containsEntry("success",true);
 			assertThat(history.get(6)).containsEntry("version","7").containsEntry("script","V7__preserve_retired_email_otp_identity_references.sql").containsEntry("success",true);
 			assertThat(history.get(7)).containsEntry("version","8").containsEntry("script","V8__preserve_google_unlink_references.sql").containsEntry("success",true);
+			assertThat(history.get(8)).containsEntry("version","9").containsEntry("script","V9__add_workout_write_foundation.sql").containsEntry("success",true);
 			jdbc.update("INSERT INTO users (id) VALUES (?)", userId);
 			var user = jdbc.queryForMap("SELECT * FROM users WHERE id = ?", userId);
 			assertThat(user).containsEntry("id", userId).containsEntry("data_generation", 0L)
@@ -133,7 +134,7 @@ class PostgresMigrationTests {
 		var checksums = java.util.Arrays.stream(v2.info().applied()).map(info -> info.getChecksum()).toList();
 		try (var context = startApplication(WebApplicationType.NONE)) {
 			var latest = context.getBean(Flyway.class);
-			assertThat(latest.info().current().getVersion().toString()).isEqualTo("8");
+			assertThat(latest.info().current().getVersion().toString()).isEqualTo("9");
 			assertThat(java.util.Arrays.stream(latest.info().applied()).limit(2).map(info -> info.getChecksum()).toList())
 					.isEqualTo(checksums);
 			assertThat(latest.migrate().migrationsExecuted).isZero();
@@ -184,12 +185,12 @@ class PostgresMigrationTests {
 		jdbc.update("INSERT INTO spring_session VALUES (?,?,1,2,60,9999999999999,?)", primary, session, user.toString());
 		jdbc.update("INSERT INTO spring_session_attributes VALUES (?,'preserved',?)", primary, new byte[]{1,2,3});
 		var tables = List.of("users", "auth_identities", "exercise_definitions", "user_workout_settings", "email_otp_limits", "email_otp_rate_limits", "spring_session");
-		var snapshots = tables.stream().map(table -> jdbc.queryForList("SELECT * FROM " + table)).toList();
+		var snapshots = tables.stream().map(table -> legacyRows(jdbc, table)).toList();
 		var bytes = jdbc.queryForObject("SELECT attribute_bytes FROM spring_session_attributes", byte[].class);
 		try (var context = startApplication(WebApplicationType.NONE)) {
 			var latest = context.getBean(Flyway.class);
 			assertThat(java.util.Arrays.stream(latest.info().applied()).limit(4).map(info -> info.getChecksum()).toList()).isEqualTo(checksums);
-			assertThat(tables.stream().map(table -> jdbc.queryForList("SELECT * FROM " + table)).toList()).isEqualTo(snapshots);
+			assertThat(tables.stream().map(table -> legacyRows(jdbc, table)).toList()).isEqualTo(snapshots);
 			assertThat(jdbc.queryForObject("SELECT attribute_bytes FROM spring_session_attributes", byte[].class)).isEqualTo(bytes);
 			assertThat(jdbc.queryForMap("SELECT purpose,state,failed_attempts,reauth_user_id,reauth_identity_id FROM email_otp_challenges"))
 					.containsEntry("purpose", "LOGIN").containsEntry("state", "ACTIVE").containsEntry("failed_attempts", 2)
@@ -368,6 +369,16 @@ class PostgresMigrationTests {
 					.POST(HttpRequest.BodyPublishers.noBody()).build(), HttpResponse.BodyHandlers.ofString());
 			assertThat(post.statusCode()).isEqualTo(405);
 		}
+	}
+
+	private List<java.util.Map<String, Object>> legacyRows(JdbcTemplate jdbc, String table) {
+		// Compare every pre-V9 column, not the newly added metadata columns.
+		var columns = switch (table) {
+			case "exercise_definitions" -> "id,user_id,data_generation,name,created_at,updated_at";
+			case "user_workout_settings" -> "user_id,data_generation,rest_low_seconds,rest_medium_seconds,rest_high_seconds,created_at,updated_at";
+			default -> "*";
+		};
+		return jdbc.queryForList("SELECT " + columns + " FROM " + table);
 	}
 
 	private ConfigurableApplicationContext startApplication(WebApplicationType webApplicationType) {
