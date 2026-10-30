@@ -54,6 +54,7 @@ class GoogleContactFrontendIntegrationTests {
                         "--GOOGLE_CLIENT_ID=" + provider.clientId, "--GOOGLE_CLIENT_SECRET=" + provider.clientSecret,
                         "--spring.session.jdbc.cleanup-cron=-", "--logging.level.root=WARN", "--spring.main.banner-mode=off");
         jdbc = app.getBean(JdbcTemplate.class);
+        com.overload.testfixture.MixedPersistenceAssertions.verify(app);
         base = "http://127.0.0.1:" + ((WebServerApplicationContext) app).getWebServer().getPort();
     }
     @BeforeEach void freshBrowser() {

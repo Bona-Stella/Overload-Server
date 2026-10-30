@@ -49,6 +49,7 @@ class AccountProvisioningIntegrationTests {
 						"--spring.datasource.password=" + postgres.getPassword(),
 						"--spring.datasource.hikari.connection-init-sql=SET statement_timeout = '15s'");
 		jdbc = context.getBean(JdbcTemplate.class);
+		com.overload.testfixture.MixedPersistenceAssertions.verify(context);
 		service = context.getBean(AccountProvisioningService.class);
 	}
 

@@ -105,7 +105,7 @@ Java 및 Spring Boot 기반의 REST API 서버를 개발합니다.
 | Framework | Spring Boot | 4.1.2 |
 | Framework Core | Spring Framework | 7.x |
 | Build Tool | Gradle | 9.8.2 |
-| ORM | Spring Data JPA / Hibernate | 미도입 (후속 도메인 단계에서 검토) |
+| ORM | Spring Data JPA / Hibernate | 008-0C: 기존 운동 종목·설정 매핑, 인증·계정 JDBC 유지 |
 | Security | Spring Security | 7.1.2, CSRF·OTP·선택적 OIDC 로그인 |
 | Authentication | Google OIDC + 이메일 OTP(Resend) / Spring Session JDBC 쿠키 세션 | 이메일 실수신 검증, Google 서버 구현·실브라우저 검증 전 |
 | Validation | Jakarta Validation | Starter 구성 완료 |
@@ -307,7 +307,8 @@ $env:JAVA_HOME = 'C:\path\to\jdk-25'
 
 `local` 프로필은 저장소 루트 `.env`로 PostgreSQL에 연결하고 Flyway를 적용합니다.
 다른 프로필은 표준 `SPRING_DATASOURCE_URL`·`SPRING_DATASOURCE_USERNAME`·`SPRING_DATASOURCE_PASSWORD`로 설정합니다.
-DB 없이 실행하는 앱 구성은 아니며 JPA는 아직 도입하지 않았습니다. 기본 HTTP 포트는 `8080`입니다.
+DB 없이 실행하는 앱 구성은 아닙니다. JPA는 기존 운동 종목·설정에 적용하며 Hibernate는 Flyway 스키마를 검증만 합니다.
+인증·계정·Spring Session JDBC는 유지합니다. 기본 HTTP 포트는 `8080`입니다.
 Health 이외의 `/api/v1` 업무 API는 아직 없습니다.
 
 ### Health Check API (구현 완료)

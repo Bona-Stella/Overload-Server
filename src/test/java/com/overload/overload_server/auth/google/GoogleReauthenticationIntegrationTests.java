@@ -66,6 +66,7 @@ class GoogleReauthenticationIntegrationTests {
 						"--spring.datasource.hikari.maximum-pool-size=2", "--spring.datasource.hikari.minimum-idle=1",
 						"--logging.level.root=WARN", "--spring.main.banner-mode=off");
 		jdbc = app.getBean(JdbcTemplate.class); base = "http://127.0.0.1:" + ((WebServerApplicationContext) app).getWebServer().getPort();
+		com.overload.testfixture.MixedPersistenceAssertions.verify(app);
 		// Flyway migration needs its own startup connection; all protocol/session tests then run with one connection.
 		var pool=app.getBean(com.zaxxer.hikari.HikariDataSource.class); pool.setMaximumPoolSize(1); pool.getHikariPoolMXBean().softEvictConnections();
 	}

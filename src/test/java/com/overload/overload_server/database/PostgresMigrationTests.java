@@ -371,13 +371,15 @@ class PostgresMigrationTests {
 	}
 
 	private ConfigurableApplicationContext startApplication(WebApplicationType webApplicationType) {
-		return new SpringApplicationBuilder(OverloadServerApplication.class)
+		var context = new SpringApplicationBuilder(OverloadServerApplication.class)
 				.web(webApplicationType)
 				.run("--spring.profiles.active=integration",
 						"--spring.datasource.url=" + postgres.getJdbcUrl(),
 						"--spring.datasource.username=" + postgres.getUsername(),
 						"--spring.datasource.password=" + postgres.getPassword(),
 						"--server.address=127.0.0.1", "--server.port=0");
+		com.overload.testfixture.MixedPersistenceAssertions.verify(context);
+		return context;
 	}
 
 }

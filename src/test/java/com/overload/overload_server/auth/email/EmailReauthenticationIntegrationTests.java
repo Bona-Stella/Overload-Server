@@ -59,6 +59,7 @@ class EmailReauthenticationIntegrationTests {
 						"--OTP_EMAIL_ENABLED=false", "--GOOGLE_OIDC_ENABLED=false", "--server.address=127.0.0.1", "--server.port=0",
 						"--spring.session.jdbc.cleanup-cron=-", "--logging.level.root=WARN", "--spring.main.banner-mode=off");
 		jdbc = app.getBean(JdbcTemplate.class); sender = app.getBean(EmailOtpFixtures.FakeSender.class);
+		com.overload.testfixture.MixedPersistenceAssertions.verify(app);
 	}
 	@BeforeEach void isolate() {
 		ReauthenticationFixtures.reset(); CLOCK.reset(); sender.reset();

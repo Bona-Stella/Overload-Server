@@ -88,6 +88,7 @@ class GoogleOidcIntegrationTests {
 						"--server.address=127.0.0.1", "--server.port=" + port, "--spring.session.jdbc.cleanup-cron=-",
 						"--logging.level.root=WARN", "--spring.main.banner-mode=off");
 		jdbc = application.getBean(JdbcTemplate.class);
+		com.overload.testfixture.MixedPersistenceAssertions.verify(application);
 		base = "http://127.0.0.1:" + ((WebServerApplicationContext) application).getWebServer().getPort();
 	}
 

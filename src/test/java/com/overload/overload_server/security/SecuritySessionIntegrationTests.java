@@ -335,7 +335,9 @@ class SecuritySessionIntegrationTests {
 		if (fixture) {
 			builder.sources(SecurityFixtures.class);
 		}
-		return builder.run(arguments.toArray(String[]::new));
+		var context = builder.run(arguments.toArray(String[]::new));
+		com.overload.testfixture.MixedPersistenceAssertions.verify(context);
+		return context;
 	}
 
 }

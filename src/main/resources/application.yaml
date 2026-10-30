@@ -1,6 +1,11 @@
 spring:
   application:
     name: overload-server
+  jpa:
+    open-in-view: false
+    generate-ddl: false
+    hibernate:
+      ddl-auto: validate
   sql:
     init:
       mode: never

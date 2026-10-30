@@ -1,0 +1,6 @@
+# Test classpath overlay: preserve local HTTP cookie behavior without importing the developer .env.
+# Every PostgreSQL integration fixture supplies its own Testcontainers URL and synthetic credentials.
+overload:
+  session:
+    cookie:
+      secure: false

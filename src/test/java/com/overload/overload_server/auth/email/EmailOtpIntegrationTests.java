@@ -75,6 +75,7 @@ class EmailOtpIntegrationTests {
 						"--OTP_HMAC_KEY=" + HMAC_KEY, "--OTP_EMAIL_ENABLED=false", "--server.address=127.0.0.1",
 						"--server.port=0", "--spring.session.jdbc.cleanup-cron=-");
 		jdbc = application.getBean(JdbcTemplate.class);
+		com.overload.testfixture.MixedPersistenceAssertions.verify(application);
 		service = application.getBean(EmailOtpService.class);
 		sender = application.getBean(EmailOtpFixtures.FakeSender.class);
 	}

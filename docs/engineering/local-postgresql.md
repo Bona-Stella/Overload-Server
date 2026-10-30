@@ -111,7 +111,8 @@ SELECT count(*) FROM users;
   V3는 공식 Spring Session JDBC 테이블·인덱스를 생성하며 Session 자체 DDL 실행은 비활성화한다.
   V4는 OTP 발급·제한·로그인 claim을 추가한다. 루틴·운동 기록·동기화 테이블은 아직 없다.
 - 스키마 변경 경로는 Flyway 하나다. 기본 SQL 초기화는 비활성화하고,
-  Flyway clean은 차단하며 자동 baseline은 사용하지 않는다. JPA/Hibernate는 도입하지 않았다.
+  Flyway clean은 차단하며 자동 baseline은 사용하지 않는다. 008-0C의 JPA/Hibernate는 기존 V2 종목·설정만 매핑하고
+  `ddl-auto=validate`, `generate-ddl=false`, `open-in-view=false`를 사용한다. 인증·계정·세션은 JDBC를 유지한다.
 - 적용한 버전 SQL을 수정하지 않는다. 이후 변경은 V2 이상 새 마이그레이션으로 추가한다.
   비어 있지 않은 미관리 스키마에서 시작이 거부되면 자동 baseline/초기화로 우회하지 않는다.
 
@@ -128,6 +129,8 @@ git diff --check
   JdbcTemplate/트랜잭션 관리자 stub은 컨텍스트 배선 테스트에만 적용하며 실행용 설정에서 DB 오류를 숨기지 않는다.
 - `integrationTest`: `postgres` 태그 테스트만 실행한다. Testcontainers PostgreSQL 18.6으로
   각 테스트의 새 컨테이너·빈 DB·임의 포트·임의 비밀번호를 사용한다. `.env` 개발 DB를 사용하지 않는다.
+  테스트 클래스패스의 `application-local.yaml`은 개발 `.env` import를 제외하면서 기존 local 쿠키 설정만 유지한다.
+  JPA/JDBC 혼용 및 실제 인증 회귀는 [008-0C 검증 보고서](../tasks/task-008-0c-jpa-jdbc-validation-report.md)를 따른다.
   최초 적용·V1 업그레이드·재시작 후 이력/사용자 보존, 스키마·제약·실제 HTTP Health,
   계정 중복 경쟁·전체 롤백·소유권/세대·운영 seed를 검증한다.
 - `check`와 `build`는 통합 테스트도 포함하므로 Docker가 필요하다.

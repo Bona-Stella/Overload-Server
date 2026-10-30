@@ -56,7 +56,7 @@ Task 007의 확정 정책과 구현 단계는 [Task 006 최종 설계 v0.3.1](..
 | Framework Core | Spring Framework 7.x |
 | Build Tool | Gradle 9.x |
 | Database | PostgreSQL 18.x |
-| Persistence | Spring Data JPA / Hibernate |
+| Persistence | 운동 도메인: Spring Data JPA / Hibernate (008-0C V2 매핑), 인증·계정: JDBC 유지 |
 | Validation | Jakarta Validation |
 | Security | Spring Security (007-1C-1 기반 도입, 실제 로그인 미구현) |
 | DB Migration | Flyway (007-1A 도입, Boot BOM 관리) |
@@ -322,8 +322,10 @@ Repository는 데이터 접근 책임을 담당합니다.
 규칙:
 
 - Spring Data JPA를 기본 데이터 접근 방식으로 사용합니다.
-- 현재 007-1B의 내부 계정 프로비저닝은 기존 JDBC로 구현하며 JPA는 미도입입니다.
+- 인증·계정 및 007-1B 내부 프로비저닝은 기존 JDBC를 유지합니다.
   신원·운영 seed·트랜잭션 계약은 [계정 프로비저닝 문서](account-provisioning.md)를 따릅니다.
+- 008-0C는 기존 개인 종목·운동 설정 V2 매핑과 운동 전용 JPA 관리자를 추가합니다.
+  기본 JDBC 관리자와 Spring Session은 유지하며 [혼용 검증 보고서](../tasks/task-008-0c-jpa-jdbc-validation-report.md)를 따릅니다.
 - 단순 CRUD는 제공되는 Repository 기능을 우선 사용합니다.
 - 복잡한 조회가 필요할 때 명시적인 Query를 검토합니다.
 - N+1 문제가 발생하지 않도록 조회 패턴을 확인합니다.
