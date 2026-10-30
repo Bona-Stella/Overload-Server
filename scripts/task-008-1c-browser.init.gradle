@@ -1,0 +1,13 @@
+// Explicit opt-in test launcher; not applied by normal application builds.
+allprojects {
+	afterEvaluate {
+		tasks.register('workoutBrowserEnvironment', JavaExec) {
+			group = 'verification'
+			description = 'Runs a disposable real PostgreSQL/backend environment for manual PWA browser verification.'
+			dependsOn tasks.named('testClasses')
+			classpath = sourceSets.test.runtimeClasspath
+			mainClass = 'com.overload.testfixture.WorkoutBrowserEnvironment'
+			javaLauncher = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(25) }
+		}
+	}
+}
