@@ -225,7 +225,7 @@ Base URL:
 
 | Method | Endpoint | Description |
 |:---|:---|:---|
-| GET | `/api/v1/exercises` | 운동 종목 목록 조회 |
+| GET | `/api/v1/exercises` | 구현: 로그인 사용자의 현재 세대 운동 종목 전체 조회 |
 | GET | `/api/v1/exercises/{id}` | 운동 종목 상세 조회 |
 
 ### Workout API
@@ -259,7 +259,7 @@ Base URL:
 | GET | `/api/v1/statistics/progress` | 운동 기록 변화 조회 |
 | GET | `/api/v1/statistics/records` | 개인 최고 기록 조회 |
 
-> 위 API는 초기 설계안입니다. 인증은 [Task 006 최종 설계 v0.3.1](docs/tasks/task-006-integrated-design-v0.3.1.md)의 쿠키 세션 방식을 따르며 아직 미구현입니다. 요청 및 응답 DTO, 경로 등 남은 기술 계약은 개발 과정에서 검증·확정합니다.
+> 위 목록에서 운동 종목 목록 GET만 구현됐으며 나머지는 초기 설계안입니다. 휴식 설정 GET `/api/v1/workout-settings`도 구현했습니다. 두 조회의 계약·검증은 [008-1A 보고서](docs/tasks/task-008-1a-workout-read-api-report.md)를 참고하세요. 인증은 기존 쿠키 세션 구현을 유지하며, 후속 쓰기 API는 별도 승인 계약을 따릅니다.
 
 ---
 
@@ -309,7 +309,7 @@ $env:JAVA_HOME = 'C:\path\to\jdk-25'
 다른 프로필은 표준 `SPRING_DATASOURCE_URL`·`SPRING_DATASOURCE_USERNAME`·`SPRING_DATASOURCE_PASSWORD`로 설정합니다.
 DB 없이 실행하는 앱 구성은 아닙니다. JPA는 기존 운동 종목·설정에 적용하며 Hibernate는 Flyway 스키마를 검증만 합니다.
 인증·계정·Spring Session JDBC는 유지합니다. 기본 HTTP 포트는 `8080`입니다.
-Health 이외의 `/api/v1` 업무 API는 아직 없습니다.
+인증·계정 API와 운동 종목·휴식 설정 GET을 제공합니다. 운동 쓰기 API와 프론트엔드 조회 연동은 아직 구현하지 않았습니다.
 
 ### Health Check API (구현 완료)
 
