@@ -20,6 +20,8 @@
   <img src="https://img.shields.io/badge/Status-Initial_Setup-6B7280?style=flat-square" alt="Status">
 </div>
 
+> **개인 로컬 DB V10 적용 완료:** 2026-10-31 사용자 승인으로 `127.0.0.1:5433/overload_dev`에 V9/V10을 적용하고 기존 데이터 보존·Flyway 검증을 통과했습니다. [실제 적용 보고서](docs/tasks/task-009-v10-local-application-report.md)를 확인하세요. 앱 시작 시 대기 중인 migration이 자동 적용될 수 있으므로 다른 DB나 후속 파괴적 migration에는 별도 승인이 필요합니다.
+
 ---
 
 ## 📌 프로젝트 소개
@@ -344,7 +346,7 @@ curl.exe -i -X POST http://localhost:8080/api/v1/health
 `--offline`은 Gradle 캐시가 준비된 경우에만 사용합니다.
 
 `test`는 DB 없이 컨텍스트 배선·Health MVC 계약, 신원 입력 계약과 운영 초기값·휴식 경계를 검증합니다.
-`integrationTest`는 일회성 PostgreSQL에서 V1→V9 마이그레이션·재시작·Health,
+`integrationTest`는 일회성 PostgreSQL에서 V1→V10 마이그레이션·재시작·Health,
 계정 원자적 생성·동시 요청·전체 롤백·소유권/세대 제약을 검증합니다.
 V3 세션 테이블·실제 HTTP/HTTPS 쿠키·CSRF·90일 절대 만료·10분 재인증 경계도 검증합니다.
 보안 응답과 프론트의 토큰 조회·갱신 계약은 [보안·세션 문서](docs/engineering/security-session.md)를 참고합니다.
@@ -357,7 +359,8 @@ Google 클라이언트 준비·정확한 localhost 콜백·활성화·세션 상
 1차 구조 정리에서 구 명령 Controller·Service·Store·Codec·stamp·영수증/feed 런타임과 전용 테스트를 제거했습니다.
 기존 1B의 종목 생성·이름 변경·휴식 설정 변경은 새 일반 API 구현 전까지 **미구현**입니다.
 운동 세션 API·IndexedDB 동기화·설치형 PWA도 아직 제공하지 않습니다. 기존 인증·계정 seed·Task 008 조회는 유지합니다.
-V1~V9 Flyway 이력은 변경하지 않았습니다. 남은 폐기 컬럼·테이블은 DB 상태/데이터 보존 확인과 승인 후 신규 마이그레이션으로 제거합니다.
+V1~V9 Flyway 이력은 변경하지 않았습니다. 정식 V10은 폐기 stamp·receipt/feed 구조만 제거하며 기존 데이터·version/deleted_at을 보존합니다.
+V10 전체 회귀·실제 V8 백업의 격리 복원/업그레이드·승인된 개인 로컬 DB V8→V9→V10 적용 결과는 [V10 최종 보고서](docs/tasks/task-009-v10-local-application-report.md)를 참고하세요.
 삭제 목록·DB 의존성과 검증 결과는 [1차 구조 정리 보고서](docs/tasks/task-009-phase-1-cleanup-report.md)를 참고하세요.
 
 ---

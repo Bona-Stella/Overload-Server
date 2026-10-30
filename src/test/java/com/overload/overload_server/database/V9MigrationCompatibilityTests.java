@@ -23,9 +23,9 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+/** Applied Flyway history still needs an upgrade/data-preservation regression after runtime removal. */
 @Tag("postgres")
 @Testcontainers
-/** Applied Flyway history still needs an upgrade/data-preservation regression after runtime removal. */
 class V9MigrationCompatibilityTests {
 
 	@Container
@@ -51,7 +51,7 @@ class V9MigrationCompatibilityTests {
 		var exercises = jdbc.queryForList("SELECT id,user_id,data_generation,name,created_at,updated_at FROM exercise_definitions ORDER BY id");
 		var settings = jdbc.queryForList("SELECT user_id,data_generation,rest_low_seconds,rest_medium_seconds,rest_high_seconds,created_at,updated_at FROM user_workout_settings");
 		try (var app = new SpringApplicationBuilder(OverloadServerApplication.class).web(WebApplicationType.NONE)
-				.run("--spring.profiles.active=integration", "--spring.datasource.url=" + postgres.getJdbcUrl(),
+				.run("--spring.profiles.active=integration", "--spring.flyway.target=9", "--spring.datasource.url=" + postgres.getJdbcUrl(),
 						"--spring.datasource.username=" + postgres.getUsername(), "--spring.datasource.password=" + postgres.getPassword(),
 						"--GOOGLE_OIDC_ENABLED=false", "--OTP_EMAIL_ENABLED=false", "--logging.level.root=WARN", "--spring.main.banner-mode=off")) {
 			MixedPersistenceAssertions.verify(app);
