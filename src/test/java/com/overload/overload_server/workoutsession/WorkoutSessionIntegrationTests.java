@@ -24,6 +24,7 @@ import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.*;
 import static org.assertj.core.api.Assertions.*;
+import static com.overload.overload_server.workoutsession.WorkoutSnapshotData.*;
 
 @Tag("postgres")
 @Testcontainers
@@ -156,7 +157,7 @@ class WorkoutSessionIntegrationTests {
         assertThatThrownBy(() -> jdbc.update("UPDATE workout_sessions SET initial_plan_snapshot=initial_plan_snapshot || '{\"routineName\":\"tampered\"}'::jsonb WHERE id=?", session)).isInstanceOf(DataIntegrityViolationException.class);
         assertThatThrownBy(() -> jdbc.update("UPDATE workout_sessions SET started_at=started_at+interval '1 second' WHERE id=?", session)).isInstanceOf(DataIntegrityViolationException.class);
         assertThatThrownBy(() -> jdbc.update("UPDATE users SET data_generation=1 WHERE id=?", owner.id())).isInstanceOf(DataIntegrityViolationException.class);
-        assertThatThrownBy(() -> jdbc.update("INSERT INTO workout_sessions SELECT ?,user_id,data_generation,source_routine_id,status,version,started_at,workout_date,started_time_zone,started_device_id,editor_device_id,writer_epoch,local_revision,initial_plan_snapshot,last_workout_synced_at,created_at,updated_at FROM workout_sessions WHERE id=?", UUID.randomUUID(), session)).isInstanceOf(DataIntegrityViolationException.class);
+        assertThatThrownBy(() -> jdbc.update("INSERT INTO workout_sessions SELECT ?,user_id,data_generation,source_routine_id,status,version,started_at,workout_date,started_time_zone,started_device_id,editor_device_id,writer_epoch,local_revision,initial_plan_snapshot,last_workout_synced_at,created_at,updated_at,applied_plan_snapshot,last_snapshot_hash,last_snapshot_saved_at FROM workout_sessions WHERE id=?", UUID.randomUUID(), session)).isInstanceOf(DataIntegrityViolationException.class);
         assertThatThrownBy(() -> jdbc.update("UPDATE workout_sessions SET writer_epoch=-1 WHERE id=?", session)).isInstanceOf(DataIntegrityViolationException.class);
         assertThatThrownBy(() -> jdbc.update("UPDATE workout_sessions SET local_revision=-1 WHERE id=?", session)).isInstanceOf(DataIntegrityViolationException.class);
     }
@@ -253,6 +254,7 @@ class WorkoutSessionIntegrationTests {
         error(browser.send("POST", path() + "/takeover", json(takeoverBody(UUID.randomUUID(), Long.toString(Long.MAX_VALUE))), csrf), 409, "WRITE_CONFLICT");
         assertThat(row()).isEqualTo(before);
         // Isolated reset fixture only, not a product reset endpoint or developer database mutation.
+        jdbc.update("DELETE FROM session_exercises WHERE user_id=?", owner.id());
         jdbc.update("DELETE FROM workout_sessions WHERE user_id=?", owner.id());
         jdbc.update("DELETE FROM routine_weight_placements WHERE user_id=?", owner.id());
         jdbc.update("DELETE FROM routine_cardio_placements WHERE user_id=?", owner.id());
@@ -327,6 +329,7 @@ class WorkoutSessionIntegrationTests {
                 new org.springframework.transaction.support.TransactionTemplate(new org.springframework.jdbc.support.JdbcTransactionManager(source))
                         .executeWithoutResult(status -> {
                             isolated.queryForObject("SELECT data_generation FROM users WHERE id=? FOR UPDATE", Long.class, owner.id());
+                            isolated.update("DELETE FROM session_exercises WHERE user_id=?", owner.id());
                             for (String table : List.of("workout_sessions", "routine_weight_placements", "routine_cardio_placements", "routines", "exercise_definitions", "user_workout_settings"))
                                 isolated.update("DELETE FROM " + table + " WHERE user_id=?", owner.id());
                             isolated.update("UPDATE users SET data_generation=1 WHERE id=?", owner.id());
@@ -340,6 +343,338 @@ class WorkoutSessionIntegrationTests {
         assertThat(node(browser.get(BASE + "/active")).get("session").isNull()).isTrue();
         assertThat(jdbc.queryForObject("SELECT count(*) FROM workout_sessions WHERE user_id=?", Integer.class, owner.id())).isZero();
     }
+
+    @Test void snapshotStoresFactsAndInitialPlanSurvivesCorrectionsAndNoOpRevisions() throws Exception {
+        var base = initialState(); var initial = node(browser.get(path())).get("initialPlan");
+        var set = set(base, UUID.randomUUID(), 4, "60", 9, new Context("INITIAL_APPROVED", null));
+        var result = completedCardio(base, UUID.randomUUID());
+        var value = state(base, List.of(set), List.of(result), List.of(), List.of(), List.of());
+        EmailOtpFixtures.CLOCK.advance(Duration.ofMinutes(1));
+        var ack = node(save(1, value)); assertThat(ack.get("duplicate").asBoolean()).isFalse();
+        assertThat(ack.get("acceptedLocalRevision").asString()).isEqualTo("1");
+        var saved = row(); assertThat(saved.get("last_workout_synced_at")).isNotEqualTo(saved.get("created_at"));
+        EmailOtpFixtures.CLOCK.advance(Duration.ofMinutes(1));
+        assertThat(node(save(1, value)).get("duplicate").asBoolean()).isTrue(); assertThat(row()).isEqualTo(saved);
+        var reordered = new State(value.sessionExercises().reversed(), value.appliedPlan(), value.performedSets(), value.cardioResults(), value.deletedPerformedSetIds(), value.deletedCardioResultIds(), value.approvalRequests());
+        assertThat(node(save(1, reordered)).get("duplicate").asBoolean()).isTrue(); assertThat(row()).isEqualTo(saved);
+        assertThat(node(save(2, value)).get("duplicate").asBoolean()).isFalse();
+        assertThat(row().get("last_workout_synced_at")).isEqualTo(saved.get("last_workout_synced_at"));
+        assertThat(row().get("last_snapshot_saved_at")).isNotEqualTo(saved.get("last_snapshot_saved_at"));
+        var detail = node(browser.get(path())); assertThat(detail.get("initialPlan")).isEqualTo(initial);
+        assertThat(detail.get("snapshot").get("state").get("performedSets").get(0).get("ordinal").asInt()).isEqualTo(4);
+        assertThat(detail.get("snapshot").get("recordedContexts").get(0).get("approvedWeightKgAtRecording").asString()).isEqualTo("60");
+        var changed = new SetValue(set.id(), set.sessionExerciseId(), 4, "61.25", 11, set.completedAt(), set.weightContext());
+        var corrected = new Cardio(result.id(), result.sessionActivityId(), result.status(), result.startedAt(), result.occurredAt(), new CardioValue(60000L, 55000L, true, "0.5", 125));
+        node(save(3, state(base, List.of(changed), List.of(corrected), List.of(), List.of(), List.of())));
+        assertThat(count("record_change_events")).isEqualTo(2);
+        assertThat(jdbc.queryForObject("SELECT before_value->>'weightKg' FROM record_change_events WHERE record_id=?", String.class, set.id())).isEqualTo("60");
+        assertThat(node(browser.get(path())).get("initialPlan")).isEqualTo(initial);
+    }
+
+    @Test void snapshotMissingFactsIsRejectedAndExplicitDeletionCannotResurrect() throws Exception {
+        var base = initialState(); var set = set(base, UUID.randomUUID(), 1, "60", 8, new Context("INITIAL_APPROVED", null));
+        var cardioResult = completedCardio(base, UUID.randomUUID());
+        var full = state(base, List.of(set), List.of(cardioResult), List.of(), List.of(), List.of()); node(save(1, full));
+        var before = row(); error(save(2, base), 422, "SNAPSHOT_INCOMPLETE"); assertThat(row()).isEqualTo(before);
+        var removedPlan = new Plan(1, List.of(), base.appliedPlan().cardioActivities());
+        var stillPerformed = new State(base.sessionExercises(), removedPlan, List.of(set), List.of(cardioResult), List.of(), List.of(), List.of());
+        error(save(2, stillPerformed), 422, "PERFORMED_EXERCISE_IN_USE");
+        var deleted = new State(base.sessionExercises(), removedPlan, List.of(), List.of(), List.of(set.id()), List.of(cardioResult.id()), List.of());
+        node(save(2, deleted)); assertThat(count("record_change_events")).isEqualTo(2);
+        var tombstones = node(browser.get(path())).get("snapshot").get("state");
+        assertThat(tombstones.get("deletedPerformedSetIds").get(0).asString()).isEqualTo(set.id().toString());
+        error(save(3, full), 422, "RECORD_DELETED");
+        var replacement = set(base, UUID.randomUUID(), 1, "60", 10, set.weightContext());
+        node(save(3, state(base, List.of(replacement), List.of(), List.of(set.id()), List.of(cardioResult.id()), List.of())));
+        assertThat(count("performed_sets")).isEqualTo(2);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM performed_sets WHERE session_id=? AND deleted_at IS NULL", Integer.class, session)).isEqualTo(1);
+    }
+
+    @Test void snapshotCannotChangeCompletionOrdinalOrApprovalContextAndRejectsClockContradictions() throws Exception {
+        var base = initialState(); var set = set(base, UUID.randomUUID(), 1, "60", 8, new Context("INITIAL_APPROVED", null));
+        node(save(1, state(base, List.of(set), List.of(), List.of(), List.of(), List.of())));
+        for (var changed : List.of(new SetValue(set.id(), set.sessionExerciseId(), 2, "60", 8, set.completedAt(), set.weightContext()),
+                new SetValue(set.id(), set.sessionExerciseId(), 1, "60", 8, set.completedAt().plusSeconds(1), set.weightContext()),
+                new SetValue(set.id(), set.sessionExerciseId(), 1, "60", 8, set.completedAt(), new Context("TODAY_ONLY", null)))) {
+            error(save(2, state(base, List.of(changed), List.of(), List.of(), List.of(), List.of())), 422, "IMMUTABLE_RECORD_CONTEXT");
+        }
+        var early = new SetValue(UUID.randomUUID(), set.sessionExerciseId(), 2, "60", 8, java.time.Instant.parse("2026-10-31T15:59:59Z"), set.weightContext());
+        error(save(2, state(base, List.of(set, early), List.of(), List.of(), List.of(), List.of())), 422, "CLOCK_CONTEXT_INVALID");
+        var c = completedCardio(base, UUID.randomUUID());
+        var impossible = new Cardio(c.id(), c.sessionActivityId(), c.status(), c.occurredAt(), c.startedAt(), c.result());
+        error(save(2, state(base, List.of(set), List.of(impossible), List.of(), List.of(), List.of())), 422, "CLOCK_CONTEXT_INVALID");
+        assertThat(count("performed_sets")).isEqualTo(1); assertThat(count("record_change_events")).isZero();
+    }
+
+    @Test void sequentialApprovalsInOneUploadAndAfterLostAckPreserveEveryIntent() throws Exception {
+        var base = initialState(); var first = approval(base, 1, null, 0, "60", "62.5");
+        var second = approval(base, 2, first.id(), 0, "62.5", "65");
+        var set = set(base, UUID.randomUUID(), 1, "65", 10, new Context("APPROVAL_REQUEST", second.id()));
+        var one = state(base, List.of(set), List.of(), List.of(), List.of(), List.of(first, second));
+        var result = node(save(1, one));
+        assertThat(result.get("approvalResults").get(0).get("status").asString()).isEqualTo("APPLIED");
+        assertThat(result.get("approvalResults").get(1).get("status").asString()).isEqualTo("APPLIED");
+        assertThat(routineVersion()).isEqualTo(1); assertThat(eventCount()).isEqualTo(2);
+        assertThat(node(save(1, one)).get("duplicate").asBoolean()).isTrue(); assertThat(eventCount()).isEqualTo(2);
+        // The client did not see the ACK: original expected version still follows our own durable edge.
+        var third = approval(base, 3, second.id(), 0, "65", "67.5");
+        var next = state(base, List.of(set), List.of(), List.of(), List.of(), List.of(first, second, third));
+        result = node(save(2, next)); assertThat(result.get("approvalResults").get(2).get("status").asString()).isEqualTo("APPLIED");
+        assertThat(routineVersion()).isEqualTo(2); assertThat(eventCount()).isEqualTo(3);
+        var detail = node(browser.get(path())).get("snapshot");
+        assertThat(detail.get("state").get("approvalRequests").get(0).get("sequence").isString()).isTrue();
+        assertThat(detail.get("recordedContexts").get(0).get("approvedWeightKgAtRecording").asString()).isEqualTo("65");
+        // Omitting request inputs is not deletion or reapplication.
+        node(save(3, state(base, List.of(set), List.of(), List.of(), List.of(), List.of())));
+        assertThat(count("session_weight_approval_requests")).isEqualTo(3); assertThat(eventCount()).isEqualTo(3);
+    }
+
+    @Test void roundTripApprovalsStillIncrementParentAndNoOpApprovalDoesNotCreateAnEvent() throws Exception {
+        var base = initialState(); var first = approval(base, 1, null, 0, "60", "62.5");
+        var second = approval(base, 2, first.id(), 0, "62.5", "60");
+        node(save(1, state(base, List.of(), List.of(), List.of(), List.of(), List.of(first, second))));
+        assertThat(routineVersion()).isEqualTo(1); assertThat(eventCount()).isEqualTo(2);
+        var syncedAt = row().get("last_workout_synced_at"); EmailOtpFixtures.CLOCK.advance(Duration.ofMinutes(1));
+        var third = approval(base, 3, second.id(), 1, "60", "60");
+        node(save(2, state(base, List.of(), List.of(), List.of(), List.of(), List.of(third))));
+        assertThat(routineVersion()).isEqualTo(1); assertThat(eventCount()).isEqualTo(2);
+        assertThat(row().get("last_workout_synced_at")).isEqualTo(syncedAt);
+    }
+
+    @Test void externalRoutineChangeLeavesApprovalsPendingButCommitsFactsAndKeepIsQueryableAfterLostResponse() throws Exception {
+        var base = initialState(); assertThat(editRoutine("PUT").statusCode()).isEqualTo(200);
+        var first = approval(base, 1, null, 0, "60", "62.5"); var second = approval(base, 2, first.id(), 0, "62.5", "65");
+        var set = set(base, UUID.randomUUID(), 1, "65", 8, new Context("APPROVAL_REQUEST", second.id()));
+        var result = node(save(1, state(base, List.of(set), List.of(completedCardio(base, UUID.randomUUID())), List.of(), List.of(), List.of(first, second))));
+        assertThat(result.get("approvalResults").get(0).get("reason").asString()).isEqualTo("ROUTINE_CHANGED");
+        assertThat(result.get("approvalResults").get(1).get("status").asString()).isEqualTo("PENDING");
+        assertThat(count("performed_sets")).isEqualTo(1); assertThat(count("cardio_results")).isEqualTo(1); assertThat(eventCount()).isZero();
+        var before = row().get("last_workout_synced_at");
+        var resolution = resolutionBody(base, List.of(first.id(), second.id()), "KEEP_CURRENT", null);
+        node(resolve(resolution)); var terminal = row();
+        var detail = node(browser.get(path())).get("snapshot");
+        assertThat(detail.get("approvalResults").get(0).get("status").asString()).isEqualTo("NOT_APPLIED");
+        assertThat(detail.get("approvalResults").get(0).get("reason").asString()).isEqualTo("KEPT_CURRENT");
+        assertThat(detail.get("approvalResults").get(0).get("resolvedAt").asString()).isEqualTo("2026-10-31T16:05:00Z");
+        node(resolve(resolution)); assertThat(row()).isEqualTo(terminal);
+        assertThat(row().get("last_workout_synced_at")).isEqualTo(before);
+        assertThat(detail.get("recordedContexts").get(0).get("approvalStateAtRecording").asString()).isEqualTo("PENDING");
+        assertThat(detail.get("recordedContexts").get(0).get("approvedWeightKgAtRecording").isNull()).isTrue();
+    }
+
+    @Test void reapprovalIsANewCurrentEventAndNeverRetroactivelyRewritesPerformance() throws Exception {
+        var base = initialState(); assertThat(editRoutine("PUT").statusCode()).isEqualTo(200);
+        var first = approval(base, 1, null, 0, "60", "65");
+        var set = set(base, UUID.randomUUID(), 1, "65", 8, new Context("APPROVAL_REQUEST", first.id()));
+        node(save(1, state(base, List.of(set), List.of(), List.of(), List.of(), List.of(first))));
+        UUID newId = UUID.randomUUID(); var next = Map.<String,Object>of("id", newId, "sequence", "2", "expectedRoutineVersion", "1", "previousApprovedWeightKg", "60", "nextApprovedWeightKg", "65");
+        var request = resolutionBody(base, List.of(first.id()), "REAPPROVE", next); node(resolve(request));
+        var terminal = row(); node(resolve(request)); assertThat(row()).isEqualTo(terminal);
+        assertThat(eventCount()).isEqualTo(1); assertThat(routineVersion()).isEqualTo(2);
+        assertThat(jdbc.queryForObject("SELECT occurred_at FROM progress_change_events WHERE approval_request_id=?", java.sql.Timestamp.class, newId).toInstant()).isEqualTo(java.time.Instant.parse("2026-10-31T16:05:00Z"));
+        var detail = node(browser.get(path())).get("snapshot");
+        assertThat(detail.get("approvalResults").get(0).get("resolvedByRequestId").asString()).isEqualTo(newId.toString());
+        assertThat(detail.get("recordedContexts").get(0).get("approvalStateAtRecording").asString()).isEqualTo("PENDING");
+        assertThat(detail.get("state").get("performedSets").get(0).get("weightContext").get("requestId").asString()).isEqualTo(first.id().toString());
+    }
+
+    @Test void newSessionExerciseWithoutRoutinePlacementPreservesPerformanceAndNeverChangesRoutineApproval() throws Exception {
+        var base = initialState(); UUID added = UUID.randomUUID();
+        var items = new ArrayList<>(base.sessionExercises()); items.add(new Exercise(added, "WEIGHT", exercise));
+        var weights = new ArrayList<>(base.appliedPlan().weightExercises()); weights.add(new WeightPlan(added, 1, 6, 10));
+        base = new State(items, new Plan(1, weights, base.appliedPlan().cardioActivities()), List.of(), List.of(), List.of(), List.of(), List.of());
+        var request = new Approval(UUID.randomUUID(), added, 1, null, 0, "60", "65", java.time.Instant.parse("2026-10-31T16:01:00Z"));
+        var set = new SetValue(UUID.randomUUID(), added, 1, "65", 8, java.time.Instant.parse("2026-10-31T16:02:00Z"), new Context("APPROVAL_REQUEST", request.id()));
+        var result = node(save(1, state(base, List.of(set), List.of(), List.of(), List.of(), List.of(request))));
+        assertThat(result.get("approvalResults").get(0).get("reason").asString()).isEqualTo("NO_SOURCE_PLACEMENT");
+        assertThat(count("performed_sets")).isEqualTo(1); assertThat(routineVersion()).isZero(); assertThat(eventCount()).isZero();
+    }
+
+    @Test void deletedSourceStillAllowsPerformanceWhileApprovalRemainsPending() throws Exception {
+        var base = initialState(); assertThat(editRoutine("DELETE").statusCode()).isEqualTo(204);
+        var request = approval(base, 1, null, 0, "60", "65");
+        var set = set(base, UUID.randomUUID(), 1, "65", 8, new Context("APPROVAL_REQUEST", request.id()));
+        var result = node(save(1, state(base, List.of(set), List.of(), List.of(), List.of(), List.of(request))));
+        assertThat(result.get("approvalResults").get(0).get("reason").asString()).isEqualTo("SOURCE_REMOVED");
+        assertThat(count("performed_sets")).isEqualTo(1); assertThat(eventCount()).isZero();
+        var next = Map.<String,Object>of("id", UUID.randomUUID(), "sequence", "2", "expectedRoutineVersion", "1", "previousApprovedWeightKg", "60", "nextApprovedWeightKg", "65");
+        error(resolve(resolutionBody(base, List.of(request.id()), "REAPPROVE", next)), 409, "SOURCE_NOT_APPROVABLE");
+        node(resolve(resolutionBody(base, List.of(request.id()), "KEEP_CURRENT", null)));
+    }
+
+    @Test void revisionReversalDifferentPayloadAndApprovalIdentityAreRejectedAtomically() throws Exception {
+        var base = initialState(); var request = approval(base, 1, null, 0, "60", "65");
+        var value = state(base, List.of(), List.of(), List.of(), List.of(), List.of(request)); node(save(2, value)); var saved = row();
+        error(save(1, value), 409, "REVISION_STALE"); error(save(2, base), 409, "REVISION_PAYLOAD_MISMATCH");
+        var changed = new Approval(request.id(), request.sessionExerciseId(), 1, null, 0, "60", "70", request.occurredAt());
+        error(save(3, state(base, List.of(), List.of(), List.of(), List.of(), List.of(changed))), 409, "APPROVAL_REQUEST_ID_CONFLICT");
+        var gap = approval(base, 3, request.id(), 1, "65", "70");
+        error(save(3, state(base, List.of(), List.of(), List.of(), List.of(), List.of(gap))), 422, "APPROVAL_SEQUENCE_GAP");
+        assertThat(row()).isEqualTo(saved); assertThat(eventCount()).isEqualTo(1);
+    }
+
+    @Test void snapshotEnforcesAuthenticationCsrfOwnershipGenerationAndCurrentEditor() throws Exception {
+        var base = initialState(); var body = saveBody(1, base); var before = row();
+        try (var anonymous = new Browser()) { error(anonymous.send("PUT", path()+"/snapshot", json(body), null), 401, "AUTHENTICATION_REQUIRED"); }
+        error(browser.send("PUT", path()+"/snapshot", json(body), null), 403, "CSRF_INVALID");
+        body.put("dataGeneration", "1"); error(browser.send("PUT", path()+"/snapshot", json(body), csrf), 409, "DATA_GENERATION_MISMATCH"); body.put("dataGeneration", "0");
+        body.put("editorDeviceId", UUID.randomUUID()); error(browser.send("PUT", path()+"/snapshot", json(body), csrf), 409, "EDITOR_OWNERSHIP_LOST");
+        try (var foreign = new Browser()) {
+            foreign.login(UUID.randomUUID()+"@example.test");
+            error(foreign.send("PUT", path()+"/snapshot", json(saveBody(1, base)), foreign.csrf()), 404, "SESSION_NOT_FOUND");
+        }
+        assertThat(row()).isEqualTo(before);
+        var taken = node(browser.send("POST", path()+"/takeover", json(takeoverBody(UUID.randomUUID(), "0")), csrf));
+        error(save(1, base), 409, "EDITOR_OWNERSHIP_LOST");
+        assertThat(taken.get("snapshot").get("state").get("appliedPlan")).isEqualTo(JSON.valueToTree(base.appliedPlan()));
+    }
+
+    @ParameterizedTest @ValueSource(strings={"insert into progress_change_events", "insert into performed_sets", "insert into record_change_events", "update workout_sessions"})
+    void actualPostgresFailureRollsBackApprovalPerformanceAuditAndRevisionTogether(String failingSql) throws Exception {
+        var base = initialState();
+        var existing = set(base, UUID.randomUUID(), 1, "60", 8, new Context("INITIAL_APPROVED", null));
+        node(save(1, state(base, List.of(existing), List.of(), List.of(), List.of(), List.of())));
+        var corrected = new SetValue(existing.id(), existing.sessionExerciseId(), 1, "61", 10, existing.completedAt(), existing.weightContext());
+        var original = row(); long version = routineVersion();
+        var request = approval(base, 1, null, 0, "60", "65");
+        var set = set(base, UUID.randomUUID(), 2, "65", 8, new Context("APPROVAL_REQUEST", request.id()));
+        var value = state(base, List.of(corrected, set), List.of(completedCardio(base, UUID.randomUUID())), List.of(), List.of(), List.of(request));
+        var once = new AtomicBoolean();
+        WorkoutReadFixtures.observer = event -> {
+            if (event.before() && event.sql().toLowerCase(Locale.ROOT).startsWith(failingSql) && once.compareAndSet(false, true)) {
+                try (var statement = event.connection().createStatement()) { statement.execute("SELECT 1/0"); }
+                catch (java.sql.SQLException e) { throw new org.springframework.dao.DataAccessResourceFailureException("isolated SQL failure", e); }
+            }
+        };
+        try { error(save(2, value), 503, "WORKOUT_DATA_UNAVAILABLE"); }
+        finally { WorkoutReadFixtures.observer = null; }
+        assertThat(row()).isEqualTo(original); assertThat(routineVersion()).isEqualTo(version);
+        assertThat(count("performed_sets")).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT weight FROM performed_sets WHERE id=?", java.math.BigDecimal.class, existing.id())).isEqualByComparingTo("60");
+        assertThat(jdbc.queryForObject("SELECT reps FROM performed_sets WHERE id=?", Integer.class, existing.id())).isEqualTo(8);
+        for (String table : List.of("cardio_results", "session_weight_approval_requests", "record_change_events")) assertThat(count(table)).isZero();
+        assertThat(eventCount()).isZero();
+        node(save(2, value)); assertThat(count("record_change_events")).isEqualTo(1);
+    }
+
+    @Test void concurrentDifferentSnapshotsAtSameRevisionSerializeAndOnlyOneWins() throws Exception {
+        var base = initialState(); var barrier = new CyclicBarrier(2);
+        WorkoutReadFixtures.observer = event -> { if(event.before() && event.sql().contains("from workout_sessions ") && event.sql().contains("for ")) await(barrier); };
+        var first = state(base, List.of(set(base, UUID.randomUUID(), 1, "60", 8, new Context("INITIAL_APPROVED", null))), List.of(), List.of(), List.of(), List.of());
+        var second = state(base, List.of(set(base, UUID.randomUUID(), 1, "60", 9, new Context("INITIAL_APPROVED", null))), List.of(), List.of(), List.of(), List.of());
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            var a = executor.submit(() -> save(1, first)); var b = executor.submit(() -> save(1, second));
+            assertThat(List.of(a.get(15, TimeUnit.SECONDS).statusCode(), b.get(15, TimeUnit.SECONDS).statusCode())).containsExactlyInAnyOrder(200, 409);
+        } finally { WorkoutReadFixtures.observer = null; }
+        assertThat(count("performed_sets")).isEqualTo(1); assertThat(row().get("local_revision")).isEqualTo(1L);
+    }
+
+    @Test void takeoverWaitsForSnapshotAndOldEpochCannotOverwriteIt() throws Exception {
+        var base = initialState(); var locked = new CountDownLatch(1); var release = new CountDownLatch(1); var once = new AtomicBoolean();
+        WorkoutReadFixtures.observer = event -> { if (!event.before() && event.sql().contains("from workout_sessions ") && event.sql().contains("for ") && once.compareAndSet(false,true)) { locked.countDown(); await(release); } };
+        var value = state(base, List.of(set(base, UUID.randomUUID(), 1, "60", 8, new Context("INITIAL_APPROVED", null))), List.of(), List.of(), List.of(), List.of());
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            var saving = executor.submit(() -> save(1, value)); assertThat(locked.await(10, TimeUnit.SECONDS)).isTrue();
+            var takeover = executor.submit(() -> browser.send("POST", path()+"/takeover", json(takeoverBody(UUID.randomUUID(), "0")), csrf));
+            try { assertLockWait("workout_sessions"); } finally { release.countDown(); }
+            assertThat(saving.get(15, TimeUnit.SECONDS).statusCode()).isEqualTo(200); assertThat(takeover.get(15, TimeUnit.SECONDS).statusCode()).isEqualTo(200);
+        } finally { release.countDown(); WorkoutReadFixtures.observer = null; }
+        error(save(2, base), 409, "EDITOR_OWNERSHIP_LOST"); assertThat(count("performed_sets")).isEqualTo(1);
+        assertThat(row().get("local_revision")).isEqualTo(0L); assertThat(row().get("last_snapshot_hash")).isNull();
+    }
+
+    @Test void approvalLocksRoutineBeforeSessionAndConcurrentEditorSeesVersionConflict() throws Exception {
+        var base = initialState(); var locked = new CountDownLatch(1); var release = new CountDownLatch(1); var once = new AtomicBoolean();
+        WorkoutReadFixtures.observer = event -> { if(!event.before() && event.sql().contains("from routines ") && event.sql().contains("for no key update") && once.compareAndSet(false,true)) { locked.countDown(); await(release); } };
+        var request = approval(base, 1, null, 0, "60", "65");
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            var saving = executor.submit(() -> save(1, state(base,List.of(),List.of(),List.of(),List.of(),List.of(request)))); assertThat(locked.await(10,TimeUnit.SECONDS)).isTrue();
+            var editing = executor.submit(() -> editRoutine("PUT"));
+            try { assertLockWait("routines"); } finally { release.countDown(); }
+            assertThat(saving.get(15,TimeUnit.SECONDS).statusCode()).isEqualTo(200); error(editing.get(15,TimeUnit.SECONDS),409,"ROUTINE_VERSION_CONFLICT");
+        } finally { release.countDown(); WorkoutReadFixtures.observer=null; }
+        assertThat(eventCount()).isEqualTo(1);
+    }
+
+    @Test void identicalConcurrentSnapshotsReturnOneCommitAndOneDuplicateAck() throws Exception {
+        var base=initialState();var barrier=new CyclicBarrier(2);
+        var value=state(base,List.of(set(base,UUID.randomUUID(),1,"60",8,new Context("INITIAL_APPROVED",null))),List.of(),List.of(),List.of(),List.of());
+        WorkoutReadFixtures.observer=event->{if(event.before()&&event.sql().contains("from workout_sessions ")&&event.sql().contains("for "))await(barrier);};
+        try(var executor=Executors.newFixedThreadPool(2)){
+            var one=executor.submit(()->save(1,value));var two=executor.submit(()->save(1,value));
+            assertThat(List.of(node(one.get(15,TimeUnit.SECONDS)).get("duplicate").asBoolean(),node(two.get(15,TimeUnit.SECONDS)).get("duplicate").asBoolean())).containsExactlyInAnyOrder(false,true);
+        }finally{WorkoutReadFixtures.observer=null;}
+        assertThat(row().get("version")).isEqualTo(1L);assertThat(count("performed_sets")).isEqualTo(1);
+    }
+
+    @Test void outsideApprovalAfterOwnLostAckCreatesPendingWithoutErasingAnyEventOrFact() throws Exception {
+        var base=initialState();var first=approval(base,1,null,0,"60","62.5");
+        node(save(1,state(base,List.of(),List.of(),List.of(),List.of(),List.of(first))));
+        var external=updateRoutine();external.put("expectedVersion","1");
+        external.put("weightApprovals",List.of(Map.of("placementId",placement,"nextApprovedWeightKg","70","occurredAt","2026-10-31T16:01:01Z")));
+        node(browser.send("PUT",routinePath(),json(external),csrf));
+        var second=approval(base,2,first.id(),0,"62.5","65");var set=set(base,UUID.randomUUID(),1,"65",9,new Context("APPROVAL_REQUEST",second.id()));
+        var ack=node(save(2,state(base,List.of(set),List.of(),List.of(),List.of(),List.of(first,second))));
+        assertThat(ack.get("approvalResults").get(1).get("status").asString()).isEqualTo("PENDING");
+        assertThat(count("performed_sets")).isEqualTo(1);assertThat(eventCount()).isEqualTo(2);assertThat(routineVersion()).isEqualTo(2);
+        assertThat(jdbc.queryForObject("SELECT approved_weight FROM routine_weight_placements WHERE id=?",java.math.BigDecimal.class,placement)).isEqualByComparingTo("70");
+        var before=row();var changed=approval(base,2,first.id(),2,"70","75");
+        error(save(3,state(base,List.of(set),List.of(),List.of(),List.of(),List.of(changed))),409,"APPROVAL_SEQUENCE_CONFLICT");assertThat(row()).isEqualTo(before);
+    }
+
+    @Test void resolutionValidatesCsrfOwnershipGenerationDeviceAndExactPendingSet() throws Exception {
+        var base=initialState();assertThat(editRoutine("PUT").statusCode()).isEqualTo(200);
+        var first=approval(base,1,null,0,"60","65");var second=approval(base,2,first.id(),0,"65","67.5");
+        node(save(1,state(base,List.of(),List.of(),List.of(),List.of(),List.of(first,second))));
+        var body=resolutionBody(base,List.of(first.id(),second.id()),"KEEP_CURRENT",null);var before=row();
+        error(browser.send("POST",path()+"/approval-resolutions",json(body),null),403,"CSRF_INVALID");
+        try(var foreign=new Browser()){
+            foreign.login(UUID.randomUUID()+"@example.test");
+            error(foreign.send("POST",path()+"/approval-resolutions",json(body),foreign.csrf()),404,"SESSION_NOT_FOUND");
+        }
+        body.put("dataGeneration","1");error(resolve(body),409,"DATA_GENERATION_MISMATCH");body.put("dataGeneration","0");
+        body.put("editorDeviceId",UUID.randomUUID());error(resolve(body),409,"EDITOR_OWNERSHIP_LOST");body.put("editorDeviceId",device);
+        body.put("pendingRequestIds",List.of(first.id()));error(resolve(body),409,"RESOLUTION_CONFLICT");body.put("pendingRequestIds",List.of(first.id(),second.id()));
+        body.put("expectedLocalRevision","0");error(resolve(body),409,"RESOLUTION_CONFLICT");assertThat(row()).isEqualTo(before);
+        var next=Map.<String,Object>of("id",UUID.randomUUID(),"sequence","3","expectedRoutineVersion","0","previousApprovedWeightKg","60","nextApprovedWeightKg","70");
+        error(resolve(resolutionBody(base,List.of(first.id(),second.id()),"REAPPROVE",next)),409,"RESOLUTION_CONFLICT");
+        assertThat(row()).isEqualTo(before);assertThat(eventCount()).isZero();
+    }
+
+    @Test void deletionAndReplacementInOneSnapshotVacateActiveUniquenessAndAuditOnce() throws Exception {
+        var base=initialState();var first=set(base,UUID.randomUUID(),1,"60",8,new Context("INITIAL_APPROVED",null));var oldCardio=completedCardio(base,UUID.randomUUID());
+        node(save(1,state(base,List.of(first),List.of(oldCardio),List.of(),List.of(),List.of())));
+        var replacement=set(base,UUID.randomUUID(),1,"61",9,new Context("TODAY_ONLY",null));
+        var skipped=new Cardio(UUID.randomUUID(),oldCardio.sessionActivityId(),"SKIPPED",null,oldCardio.occurredAt(),null);
+        var value=state(base,List.of(replacement),List.of(skipped),List.of(first.id()),List.of(oldCardio.id()),List.of());
+        node(save(2,value));assertThat(count("record_change_events")).isEqualTo(2);assertThat(count("performed_sets")).isEqualTo(2);assertThat(count("cardio_results")).isEqualTo(2);
+        node(save(3,value));assertThat(count("record_change_events")).isEqualTo(2);
+    }
+
+    @Test void ownApprovalSequenceCannotRunBackwardsInDeviceTime() throws Exception {
+        var base=initialState();var first=approval(base,1,null,0,"60","65");node(save(1,state(base,List.of(),List.of(),List.of(),List.of(),List.of(first))));
+        var next=new Approval(UUID.randomUUID(),first.sessionExerciseId(),2,null,1,"65","70",first.occurredAt().minusMillis(1));
+        error(save(2,state(base,List.of(),List.of(),List.of(),List.of(),List.of(next))),422,"CLOCK_CONTEXT_INVALID");
+        assertThat(eventCount()).isEqualTo(1);
+    }
+
+    State initialState() throws Exception { return JSON.treeToValue(node(start(startBody())).get("snapshot").get("state"), State.class); }
+    static State state(State base,List<SetValue> sets,List<Cardio> cardio,List<UUID> deletedSets,List<UUID> deletedCardio,List<Approval> approvals) {
+        return new State(base.sessionExercises(),base.appliedPlan(),sets,cardio,deletedSets,deletedCardio,approvals);
+    }
+    static SetValue set(State base,UUID id,int ordinal,String weight,int reps,Context context) { return new SetValue(id,base.appliedPlan().weightExercises().getFirst().sessionExerciseId(),ordinal,weight,reps,java.time.Instant.parse("2026-10-31T16:02:00Z"),context); }
+    static Cardio completedCardio(State base,UUID id) { return new Cardio(id,base.appliedPlan().cardioActivities().getFirst().sessionActivityId(),"COMPLETED",java.time.Instant.parse("2026-10-31T16:01:00Z"),java.time.Instant.parse("2026-10-31T16:02:00Z"),new CardioValue(60000L,60000L,false,null,null)); }
+    static Approval approval(State base,long sequence,UUID previous,long version,String oldWeight,String newWeight) { return new Approval(UUID.randomUUID(),base.appliedPlan().weightExercises().getFirst().sessionExerciseId(),sequence,previous,version,oldWeight,newWeight,java.time.Instant.parse("2026-10-31T16:01:00Z").plusMillis(sequence)); }
+    Map<String,Object> saveBody(long revision,State value) { return new LinkedHashMap<>(Map.of("dataGeneration","0","editorDeviceId",device,"writerEpoch","0","localRevision",Long.toString(revision),"snapshot",value)); }
+    HttpResponse<String> save(long revision,State value) throws Exception { return browser.send("PUT",path()+"/snapshot",json(saveBody(revision,value)),csrf); }
+    HttpResponse<String> resolve(Map<String,Object> body) throws Exception { return browser.send("POST",path()+"/approval-resolutions",json(body),csrf); }
+    Map<String,Object> resolutionBody(State base,List<UUID> pending,String decision,Object next) {
+        var body=new LinkedHashMap<String,Object>(); body.put("dataGeneration","0");body.put("editorDeviceId",device);body.put("writerEpoch","0");body.put("expectedSessionVersion",row().get("version").toString());body.put("expectedLocalRevision",row().get("local_revision").toString());
+        body.put("sessionExerciseId",base.appliedPlan().weightExercises().getFirst().sessionExerciseId());body.put("pendingRequestIds",pending);body.put("decision",decision);body.put("occurredAt","2026-10-31T16:05:00Z");body.put("newApprovalRequest",next);return body;
+    }
+    int count(String table) { return jdbc.queryForObject("SELECT count(*) FROM "+table+" WHERE session_id=?",Integer.class,session); }
+    long routineVersion() { return jdbc.queryForObject("SELECT version FROM routines WHERE id=?",Long.class,routine); }
+    int eventCount() { return jdbc.queryForObject("SELECT count(*) FROM progress_change_events WHERE routine_id=?",Integer.class,routine); }
 
     HttpResponse<String> editRoutine(String method) throws Exception {
         return browser.send(method, routinePath(), json(method.equals("PUT") ? updateRoutine() : Map.of("dataGeneration", "0", "expectedVersion", "0")), csrf);

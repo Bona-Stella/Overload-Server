@@ -108,8 +108,8 @@ Task 009 및 이후 운동 쓰기·진행 세션·복구 작업 시 필수:
 폐기된 범용 명령·Outbox·필드 병합·영수증/feed 구조를 다시 구현하지 않습니다.
 일반 온라인 종목 생성·이름 변경·휴식 설정 변경은 [온라인 쓰기 API 계약](docs/api/workout-online-write.md)을 따릅니다.
 루틴 관리 API는 [루틴 온라인 계약](docs/api/routine-management.md)을 따릅니다. 개인 로컬 V11 적용·기존 데이터 보존은 사용자 확인 사항입니다.
-세션 1단계 START·ACTIVE/상세 조회·takeover와 V12는 [세션 계약](docs/api/workout-sessions.md)을 따릅니다. V12는 격리 PostgreSQL에서만 검증하고 개인 로컬 `overload_dev`에 적용하지 않습니다.
-snapshot·승인 충돌·finish·24시간 자동 종료·사후 정정·IndexedDB는 후속 미구현 범위입니다. takeover는 마지막 운동 동기화 시각을 연장하지 않습니다.
+세션 START·조회·takeover(V12), 확정 snapshot·명시 승인 요청/충돌 해결(V13)은 [세션 계약](docs/api/workout-sessions.md)을 따릅니다. V12·V13은 격리 PostgreSQL에서만 검증하고 개인 로컬 `overload_dev`에 적용하지 않습니다.
+finish·공식 평가·24시간 자동 종료·종료 후 정정/복구·IndexedDB는 후속 미구현 범위입니다. 조회·중복·takeover·실제 무변경 snapshot·승인 해결은 마지막 운동 동기화 시각을 연장하지 않습니다.
 2026-10-31 사용자 승인으로 개인 로컬 `127.0.0.1:5433/overload_dev`에 V9/V10을 적용하고 기존 데이터를 보존했습니다.
 근거는 [실제 적용 보고서](docs/tasks/task-009-v10-local-application-report.md)를 따릅니다. 다른 DB나 후속 파괴적 마이그레이션은 이 승인에 포함되지 않습니다.
 Task 006의 운동·인증 정책은 v1.0에서 명시적으로 바꾼 부분을 제외하고 유지합니다.

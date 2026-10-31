@@ -359,9 +359,9 @@ Google 클라이언트 준비·정확한 localhost 콜백·활성화·세션 상
 1차 구조 정리에서 구 명령 Controller·Service·Store·Codec·stamp·영수증/feed 런타임과 전용 테스트를 제거했습니다.
 종목 생성·이름 변경·휴식 설정 변경은 범용 명령 없이 일반 Controller·Service·DTO와 기존 JPA 트랜잭션으로 구현했습니다. [온라인 쓰기 API 계약](docs/api/workout-online-write.md)을 참고하세요. 웨이트·유산소 루틴 CRUD·배치 논리 제거/명시 복원·명시적 중량 승인도 [루틴 관리 계약](docs/api/routine-management.md)으로 구현했습니다.
 V11은 루틴 관련 네 테이블만 추가합니다. 개인 로컬 V11 적용·기존 데이터 보존은 후속 사용자 확인 사항입니다.
-세션 1단계는 [START·ACTIVE/상세·takeover](docs/api/workout-sessions.md) 및 V12의 세션 한 테이블을 추가합니다. InitialPlan은 불변 JSONB 하나에 보존하고 ACTIVE는 세대와 무관하게 사용자당 하나입니다.
-**V12는 격리 PostgreSQL에서만 검증하며 개인 로컬 overload_dev에 적용하지 않습니다.** 실제 DB로 앱을 시작하면 대기 migration이 적용될 수 있으므로 이번 검증에서 local 앱을 실행하지 않습니다.
-snapshot·승인 충돌·finish·24시간 자동 종료·사후 정정·IndexedDB·설치형 PWA는 미구현입니다. takeover와 조회는 운동 동기화 시각을 연장하지 않습니다. 기존 인증·계정 seed·Task 008 조회는 유지합니다.
+세션 [START·ACTIVE/상세·takeover 및 확정 snapshot·승인 요청/해결](docs/api/workout-sessions.md)은 V12·V13을 사용합니다. InitialPlan은 불변 JSONB 하나에 보존하고 ACTIVE는 세대와 무관하게 사용자당 하나입니다. 수행은 관계형 저장하며 승인 충돌이 유효 수행 저장을 막지 않습니다.
+**V12·V13은 격리 PostgreSQL에서만 검증하며 개인 로컬 overload_dev에 적용하지 않습니다.** 실제 DB로 앱을 시작하면 대기 migration이 적용될 수 있으므로 이번 검증에서 개인 local 앱을 실행하지 않습니다.
+finish·공식 평가·24시간 자동 종료·종료 후 정정/복구·IndexedDB·설치형 PWA는 미구현입니다. 조회·takeover·중복·무변경 snapshot·승인 해결은 운동 동기화 시각을 연장하지 않습니다. 기존 인증·계정 seed·Task 008 조회는 유지합니다.
 V1~V9 Flyway 이력은 변경하지 않았습니다. 정식 V10은 폐기 stamp·receipt/feed 구조만 제거하며 기존 데이터·version/deleted_at을 보존합니다.
 V10 전체 회귀·실제 V8 백업의 격리 복원/업그레이드·승인된 개인 로컬 DB V8→V9→V10 적용 결과는 [V10 최종 보고서](docs/tasks/task-009-v10-local-application-report.md)를 참고하세요.
 삭제 목록·DB 의존성과 검증 결과는 [1차 구조 정리 보고서](docs/tasks/task-009-phase-1-cleanup-report.md)를 참고하세요.

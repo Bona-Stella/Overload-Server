@@ -13,7 +13,18 @@ import java.net.URI;
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 public class WorkoutSessionController {
     private final WorkoutSessionService service;
-    WorkoutSessionController(WorkoutSessionService service) { this.service = service; }
+    private final WorkoutSnapshotService snapshots;
+    WorkoutSessionController(WorkoutSessionService service,WorkoutSnapshotService snapshots) { this.service = service; this.snapshots=snapshots; }
+    @PutMapping(value="/{id}/snapshot",consumes="application/json")
+    ResponseEntity<WorkoutSnapshotData.Ack> snapshot(@AuthenticationPrincipal SessionPrincipal principal,
+            @PathVariable String id,@RequestBody String body,HttpServletRequest request){
+        validate(request,false);return ok(snapshots.save(principal.userId(),WorkoutSessionRequests.uuid(id),WorkoutSnapshotRequests.save(body)));
+    }
+    @PostMapping(value="/{id}/approval-resolutions",consumes="application/json")
+    ResponseEntity<WorkoutSnapshotData.Resolution> resolve(@AuthenticationPrincipal SessionPrincipal principal,
+            @PathVariable String id,@RequestBody String body,HttpServletRequest request){
+        validate(request,false);return ok(snapshots.resolve(principal.userId(),WorkoutSessionRequests.uuid(id),WorkoutSnapshotRequests.resolve(body)));
+    }
 
     @PostMapping(consumes = "application/json")
     ResponseEntity<WorkoutSessionResponses.Detail> start(@AuthenticationPrincipal SessionPrincipal principal,

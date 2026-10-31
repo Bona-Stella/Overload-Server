@@ -12,6 +12,29 @@ public class RoutineRepository {
 	@PersistenceContext private EntityManager entityManager;
 	private final JdbcTemplate jdbc;
 	RoutineRepository(JdbcTemplate jdbc) { this.jdbc = jdbc; }
+	/** Caller owns workoutTransactionManager. This scope does not start or commit a second transaction. */
+	public ApprovalScope lockForWorkoutApproval(UUID owner,long generation,UUID id) {
+		return new ApprovalScope(find(owner,generation,id,true));
+	}
+	public final class ApprovalScope {
+		private final Routine routine;
+		private final Map<UUID,RoutineWeightPlacement> placements=new HashMap<>();
+		private boolean changed;
+		private ApprovalScope(Routine r){routine=r;weights(r).forEach(p->placements.put(p.id,p));}
+		public long version(){return routine.version;}
+		public boolean available(UUID id){var p=placements.get(id);return routine.deletedAt==null&&p!=null&&p.deletedAt==null;}
+		public java.math.BigDecimal weight(UUID id){return placements.get(id).approvedWeight;}
+		public boolean changed(){return changed;}
+		public void apply(UUID placement,UUID session,UUID exercise,UUID request,String routineName,String exerciseName,
+				java.math.BigDecimal next,java.time.Instant occurred,java.time.Instant now){
+			var p=placements.get(placement);
+			if(p.approvedWeight.compareTo(next)!=0){
+				insert(ProgressChangeEvent.workout(routine,p,session,exercise,request,routineName,exerciseName,next,occurred,now));
+				p.approvedWeight=next;p.updatedAt=now;changed=true;
+			}
+		}
+		public void complete(java.time.Instant now){if(changed)routine.changed(now);}
+	}
 
 	/** START's existing workout transaction owns these locks through InitialPlan insertion and commit. */
 	public Optional<RoutineResponses.Detail> planForWorkoutStart(UUID owner, long generation, UUID id) {

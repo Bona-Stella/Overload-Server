@@ -24,8 +24,8 @@ Task 007의 확정 정책과 구현 단계는 [Task 006 최종 설계 v0.3.1](..
 Task 006의 나머지 운동·인증 정책과 기존 Task 008 조회 계약은 유지합니다.
 일반 온라인 종목 생성·이름 변경·휴식 설정 변경은 [온라인 쓰기 API 계약](../api/workout-online-write.md)을 따릅니다.
 웨이트·유산소 루틴 관리 및 명시적 승인 중량 변경은 [루틴 온라인 계약](../api/routine-management.md)을 따릅니다.
-세션 1단계 START·조회·takeover는 [세션 계약](../api/workout-sessions.md)을 따릅니다. 신규 V12는 개인 로컬 overload_dev에 적용하지 않습니다.
-snapshot·승인 충돌·finish·자동 종료·IndexedDB는 미구현입니다.
+세션 START·조회·takeover와 확정 snapshot·승인 요청/해결은 [세션 계약](../api/workout-sessions.md)을 따릅니다. V12·V13은 개인 로컬 overload_dev에 적용하지 않습니다.
+finish·공식 평가·자동 종료·종료 후 정정/복구·IndexedDB는 미구현입니다.
 
 본 문서는 다음 항목에 집중합니다.
 

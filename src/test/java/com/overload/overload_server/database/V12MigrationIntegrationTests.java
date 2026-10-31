@@ -31,7 +31,7 @@ class V12MigrationIntegrationTests {
         var tables = jdbc.queryForList("SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename", String.class);
         var rows = new LinkedHashMap<String, List<String>>();
         for (String table : tables) rows.put(table, jdbc.queryForList("SELECT to_jsonb(t)::text FROM " + table + " t ORDER BY to_jsonb(t)::text", String.class));
-        var latest = Flyway.configure().dataSource(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword()).load();
+        var latest = Flyway.configure().dataSource(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword()).target("12").load();
         assertThat(latest.migrate().migrationsExecuted).isEqualTo(1);
         for (String table : tables) {
             String filter = table.equals("flyway_schema_history") ? " WHERE installed_rank<=11" : "";

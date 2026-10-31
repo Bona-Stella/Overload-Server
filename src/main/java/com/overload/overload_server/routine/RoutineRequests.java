@@ -13,6 +13,15 @@ public final class RoutineRequests {
 	private static final JsonMapper JSON = JsonMapper.builder().enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION).build();
 	private RoutineRequests() { }
 	public enum Mode { NEW, EXISTING, RESTORE }
+	/** Reuses the existing closed CardioPlan contract without changing the routine HTTP boundary. */
+	public static Optional<JsonNode> canonicalCardioPlan(JsonNode value) {
+		try {
+			var p = cardioPlan(value);
+			return Optional.of(JSON.valueToTree(new RoutineResponses.Plan(p.kind(),p.name(),p.targetSeconds(),RoutineResponses.decimal(p.targetDistanceKm()),
+					p.intensityMode()==null?null:new RoutineResponses.Intensity(p.intensityMode(),RoutineResponses.decimal(p.intensityValue())),
+					RoutineResponses.decimal(p.inclinePercent()),RoutineResponses.decimal(p.resistance()))));
+		} catch (RoutineFailure failure) { return Optional.empty(); }
+	}
 	public record Weight(Mode mode, UUID id, UUID exerciseDefinitionId, int setCount, int minReps, int maxReps, BigDecimal initialWeightKg) { }
 	public record Plan(String kind, String name, int targetSeconds, BigDecimal targetDistanceKm,
 			String intensityMode, BigDecimal intensityValue, BigDecimal inclinePercent, BigDecimal resistance) { }
@@ -118,26 +127,28 @@ public final class RoutineRequests {
 		var result = new ArrayList<Cardio>();
 		for (var item : array(body, "cardioPlacements")) {
 			if (create) fields(item, "id", "plan"); else fields(item, "mode", "id", "plan");
-			var plan = item.get("plan"); fields(plan, "kind", "name", "targetSeconds", "targetDistanceKm", "intensity", "inclinePercent", "resistance");
-			String kind = text(plan, "kind"), name = name(plan, "name");
-			if (!Set.of("TREADMILL", "BIKE", "OUTDOOR", "STAIRS", "OTHER").contains(kind) || name.length() > 100) throw invalid();
-			int seconds = count(plan, "targetSeconds"); if (seconds > 86400) throw invalid();
-			var distance = optionalDecimal(plan, "targetDistanceKm", "0.001", "1000");
-			var incline = optionalDecimal(plan, "inclinePercent", "0", "50");
-			var resistance = optionalDecimal(plan, "resistance", "1", "100");
-			var intensity = plan.get("intensity"); String intensityMode = null; BigDecimal intensityValue = null;
-			if (!intensity.isNull()) {
-				fields(intensity, "mode", "value"); intensityMode = text(intensity, "mode");
-				if (!Set.of("SPEED", "PACE").contains(intensityMode)) throw invalid();
-				intensityValue = optionalDecimal(intensity, "value", "0.1", intensityMode.equals("SPEED") ? "100" : "120");
-				if (intensityValue == null) throw invalid();
-			}
-			if ((!Set.of("TREADMILL", "BIKE", "OUTDOOR").contains(kind) && (distance != null || intensityMode != null))
-					|| (!kind.equals("TREADMILL") && incline != null) || (!kind.equals("BIKE") && resistance != null)) throw invalid();
-			result.add(new Cardio(create ? Mode.NEW : mode(item), uuid(text(item, "id")),
-					new Plan(kind, name, seconds, distance, intensityMode, intensityValue, incline, resistance)));
+			result.add(new Cardio(create ? Mode.NEW : mode(item), uuid(text(item, "id")), cardioPlan(item.get("plan"))));
 		}
 		return List.copyOf(result);
+	}
+	private static Plan cardioPlan(JsonNode plan) {
+		fields(plan, "kind", "name", "targetSeconds", "targetDistanceKm", "intensity", "inclinePercent", "resistance");
+		String kind = text(plan, "kind"), name = name(plan, "name");
+		if (!Set.of("TREADMILL", "BIKE", "OUTDOOR", "STAIRS", "OTHER").contains(kind) || name.length() > 100) throw invalid();
+		int seconds = count(plan, "targetSeconds"); if (seconds > 86400) throw invalid();
+		var distance = optionalDecimal(plan, "targetDistanceKm", "0.001", "1000");
+		var incline = optionalDecimal(plan, "inclinePercent", "0", "50");
+		var resistance = optionalDecimal(plan, "resistance", "1", "100");
+		var intensity = plan.get("intensity"); String intensityMode = null; BigDecimal intensityValue = null;
+		if (!intensity.isNull()) {
+			fields(intensity, "mode", "value"); intensityMode = text(intensity, "mode");
+			if (!Set.of("SPEED", "PACE").contains(intensityMode)) throw invalid();
+			intensityValue = optionalDecimal(intensity, "value", "0.1", intensityMode.equals("SPEED") ? "100" : "120");
+			if (intensityValue == null) throw invalid();
+		}
+		if ((!Set.of("TREADMILL", "BIKE", "OUTDOOR").contains(kind) && (distance != null || intensityMode != null))
+				|| (!kind.equals("TREADMILL") && incline != null) || (!kind.equals("BIKE") && resistance != null)) throw invalid();
+		return new Plan(kind, name, seconds, distance, intensityMode, intensityValue, incline, resistance);
 	}
 	private static void composition(List<Weight> weights, List<Cardio> cardio) {
 		if (weights.isEmpty() && cardio.isEmpty()) throw invalid();

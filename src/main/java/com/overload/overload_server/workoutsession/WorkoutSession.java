@@ -28,6 +28,9 @@ public class WorkoutSession {
     @Column(name = "last_workout_synced_at", nullable = false) Instant lastWorkoutSyncedAt;
     @Column(name = "created_at", nullable = false, updatable = false) Instant createdAt;
     @Column(name = "updated_at", nullable = false) Instant updatedAt;
+    @JdbcTypeCode(SqlTypes.JSON) @Column(name="applied_plan_snapshot",nullable=false,columnDefinition="jsonb") String appliedPlan;
+    @Column(name="last_snapshot_hash",columnDefinition="text") String lastSnapshotHash;
+    @Column(name="last_snapshot_saved_at") Instant lastSnapshotSavedAt;
 
     protected WorkoutSession() { }
 
@@ -38,6 +41,7 @@ public class WorkoutSession {
         value.startedAt = input.startedAt(); value.workoutDate = input.workoutDate(); value.startedTimeZone = input.startedTimeZone();
         value.startedDeviceId = input.editorDeviceId(); value.editorDeviceId = input.editorDeviceId();
         value.initialPlan = plan.json(); value.lastWorkoutSyncedAt = now; value.createdAt = now; value.updatedAt = now;
+        value.appliedPlan=WorkoutSnapshotData.json(WorkoutSnapshotData.initial(plan));
         return value;
     }
 
@@ -54,5 +58,6 @@ public class WorkoutSession {
         if (writerEpoch != input.expectedWriterEpoch()) throw new WorkoutSessionFailure(EDITOR_OWNERSHIP_LOST);
         if (writerEpoch == Long.MAX_VALUE || version == Long.MAX_VALUE) throw new WorkoutSessionFailure(WRITE_CONFLICT);
         editorDeviceId = input.editorDeviceId(); writerEpoch++; localRevision = 0; version++; updatedAt = now;
+        lastSnapshotHash=null; lastSnapshotSavedAt=null;
     }
 }

@@ -76,9 +76,9 @@ class AccountProvisioningIntegrationTests {
 		assertThat(jdbc.queryForList("""
 				SELECT table_name FROM information_schema.tables
 				WHERE table_schema = 'public' ORDER BY table_name
-				""", String.class)).containsExactly("auth_identities", "email_otp_challenges", "email_otp_limits",
+				""", String.class)).containsExactly("auth_identities", "cardio_results", "email_otp_challenges", "email_otp_limits",
 				"email_otp_login_claims", "email_otp_rate_limits", "exercise_definitions",
-				"flyway_schema_history", "google_identity_change_versions", "progress_change_events", "reauth_email_candidates", "routine_cardio_placements", "routine_weight_placements", "routines", "spring_session", "spring_session_attributes", "user_reauthentication_emails", "user_workout_settings", "users", "workout_sessions");
+				"flyway_schema_history", "google_identity_change_versions", "performed_sets", "progress_change_events", "reauth_email_candidates", "record_change_events", "routine_cardio_placements", "routine_weight_placements", "routines", "session_exercises", "session_weight_approval_requests", "spring_session", "spring_session_attributes", "user_reauthentication_emails", "user_workout_settings", "users", "workout_sessions");
 	}
 
 	@Test
