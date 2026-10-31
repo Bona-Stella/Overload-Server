@@ -34,6 +34,7 @@ public class WorkoutSession {
     @Column(name="last_snapshot_saved_at") Instant lastSnapshotSavedAt;
     @Column(name="ended_at") Instant endedAt;
     @Column(name="closed_at") Instant closedAt;
+    @Column(name="deleted_at") Instant deletedAt;
     @JdbcTypeCode(SqlTypes.JSON) @Column(name="completion_assessment_snapshot",columnDefinition="jsonb") String completionAssessment;
 
     protected WorkoutSession() { }
@@ -65,6 +66,7 @@ public class WorkoutSession {
     }
 
     void takeover(WorkoutSessionRequests.Takeover input, Instant now) {
+        if (deletedAt!=null) throw new WorkoutSessionFailure(SESSION_DELETED);
         if (!status.equals("ACTIVE")) throw new WorkoutSessionFailure(SESSION_NOT_ACTIVE);
         // Lost response retry confirms the immediately preceding takeover without moving counters or the deadline.
         if (input.expectedWriterEpoch() < Long.MAX_VALUE && writerEpoch == input.expectedWriterEpoch() + 1

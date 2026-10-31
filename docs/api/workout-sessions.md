@@ -1,13 +1,13 @@
-# 운동 세션 API — Task 009 1~3단계
+# 운동 세션 API — Task 009 1~4단계
 
-상태: START·조회·takeover·snapshot·승인 요청/해결, FINISH·최초 공식 평가 봉인·24시간 AUTO_CLOSED 구현. V12~V14는 격리 PostgreSQL에서만 검증하며 개인 로컬 `overload_dev`에는 적용하지 않는다.
+상태: START·조회·takeover·snapshot·승인 요청/해결, FINISH·최초 평가 봉인·24시간 AUTO_CLOSED, 종료 후 수행 정정·삭제·명시 복구·현재 평가·승인 해결 구현. V12~V15는 격리 PostgreSQL에서만 검증하며 개인 로컬 `overload_dev`에는 적용하지 않는다.
 기준: [현행 설계와 후속 승인 보완](../tasks/task-009-redesign-v1.0.md), [루틴 계약](routine-management.md), 기존 인증·CSRF·Task 008 영속성 경계.
 
 ## 현재 제공 범위
 
 V12는 `workout_sessions`를 추가한다. InitialPlan은 `initial_plan_snapshot` JSONB 하나가 유일한 원본이다.
 V13은 현재 AppliedPlan과 수행·승인·정정 사실을 추가한다. V14는 명시 종료 시각·서버 종료 시각·최초 평가만 추가한다. 예정 세트 수만큼 수행 행이나 객체를 생성하지 않는다.
-종료 후 정정·복구·Frontend/IndexedDB 연결은 후속 단계다. 종료된 세션의 ACTIVE 쓰기나 자동 재개는 제공하지 않는다.
+V15는 기존 테이블의 논리 삭제·복구 이력·승인 문맥만 확장한다. Frontend/IndexedDB 연결은 후속 단계다. 종료된 세션의 ACTIVE 쓰기나 자동 재개는 제공하지 않는다.
 
 ## HTTP·인증
 
@@ -27,6 +27,12 @@ JSON 중복 키·추가 필드·필수 필드 누락·명시적으로 허용하�
 | PUT | /api/v1/workout-sessions/{id}/snapshot | 200, 전체 확정 상태 저장 또는 중복 ACK |
 | POST | /api/v1/workout-sessions/{id}/approval-resolutions | 200, 미해결 승인 명시 해결 또는 결과 재확인 |
 | POST | /api/v1/workout-sessions/{id}/finish | 200, 최종 snapshot·최초 평가·종료 또는 동일 종료 재확인 |
+| PATCH | /api/v1/workout-sessions/{id}/records | 200, 종료 후 선택 수행 정정·명시 삭제 |
+| POST | /api/v1/workout-sessions/{id}/recoveries | 200, 종료 후 선택한 누락 완료 수행 복구 |
+| DELETE | /api/v1/workout-sessions/{id} | 200, 종료 세션 전체 논리 삭제 |
+| POST | /api/v1/workout-sessions/{id}/closed-approval-resolutions | 200, 종료 후 PENDING 해결 |
+| GET | /api/v1/workout-sessions/{id}/assessment | 200, 최초 평가·현재 평가 구분 |
+| GET | /api/v1/workout-sessions/{id}/record-change-events | 200, 본인 세션 변경 이력 |
 
 START의 모든 필드:
 
@@ -58,7 +64,7 @@ takeover는 lastWorkoutSyncedAt을 갱신하지 않는다. 별도 heartbeat·주
 ```text
 {userId,dataGeneration,id,status:"ACTIVE"|"FINISHED"|"AUTO_CLOSED",version,startedAt,workoutDate,startedTimeZone,
  editorDeviceId,writerEpoch,localRevision,lastWorkoutSyncedAt,initialPlan,lastSnapshotSavedAt,snapshot,
- endedAt:Instant|null,closedAt:Instant|null,completionAssessment:CompletionAssessment|null}
+ endedAt:Instant|null,closedAt:Instant|null,completionAssessment:CompletionAssessment|null,deletedAt:Instant|null}
 initialPlan = {schemaVersion:1,routineId,routineName,routineVersion,
  weightExercises:[{sessionExerciseId,sourcePlacementId,exerciseDefinitionId,exerciseName,
    setCount,minReps,maxReps,initialWeightKg,approvedWeightKg}],
@@ -250,7 +256,7 @@ REAPPROVE는 `decision:"REAPPROVE"`, `newApprovalRequest:{id:새UUID,sequence:�
 CSRF·소유권·세대·편집 기기·epoch 검증은 중복 ACK와 해결 재확인에도 우회하지 않는다.
 
 추가400 INVALID_REQUEST,404 RECORD_NOT_FOUND/EXERCISE_NOT_FOUND,409 RECORD_ID_CONFLICT(다른 문맥이 점유한 수행/종목 UUID),422 INVALID_SNAPSHOT/IMMUTABLE_RECORD_CONTEXT/RECORD_DELETED와 위 도메인 오류를 사용한다. 기존503/500 저장소 오류 경계는 유지한다.
-종료 후 일반 정정/복구 API는 아직 제공하지 않는다.
+위 snapshot/approval-resolutions는 ACTIVE 전용이다. 종료 후 수정은 아래 별도 계약을 사용한다.
 
 ## FINISH — 최종 snapshot과 최초 종료 평가
 
@@ -282,7 +288,7 @@ CSRF·소유권·세대·편집 기기·epoch 검증은 중복 ACK와 해결 재
 응답의 정확한 필드:
 
 ```text
-{userId,dataGeneration,sessionId,status:"FINISHED",writerEpoch,acceptedLocalRevision,version,
+{userId,dataGeneration,sessionId,status:"FINISHED",writerEpoch,acceptedLocalRevision,version,currentVersion,deletedAt:Instant|null,
  snapshotSavedAt,lastWorkoutSyncedAt,endedAt,closedAt,duplicate,approvalResults:[ApprovalResult],
  completionAssessment:CompletionAssessment}
 CompletionAssessment = {schemaVersion:1,ruleVersion:"task009-completion-v1",assessedAt,sessionVersion,
@@ -297,6 +303,7 @@ Benchmark = {sessionId,sessionVersion,endedAt,performedSetIds:[UUID],reps:[Count
 Counter는 기존과 같은 정규 문자열이다. 유산소만 있는 세션은 overallWeightPlanComplete=null, exercises=[]이며 가짜 웨이트 평가를 만들지 않는다.
 APPLIED_PLAN은 별도 사본 없이 기존 applied_plan_snapshot을 종료와 동시에 동결한다. JSONB 최초 평가의 선택 UUID·반복 배열·합계는 불변 판단 근거이며 편집 가능한 수행 원본이 아니다. 관계형 실제 수행을 평가 JSON으로 수정하지 않는다.
 최초 평가의 sessionVersion 및 finish 응답 version은 최초 종료 version이다. 향후 허용 정정으로 현재 상세 version이 달라지더라도 최초 종료 결과를 바꾸지 않는다.
+currentVersion은 현재 세션 version이다. approvalResults는 현재 승인 해결 결과를 반환한다. 최초 평가·endedAt·closedAt·종료 식별 hash/epoch/revision과 현재 승인 결과를 구분한다. 전체 논리 삭제 뒤에도 원래 FINISH 재확인은200이며 deletedAt을 함께 반환한다. 이는 저장·복원·평가 재실행이 아니고 삭제 기록을 다시 노출하는 근거가 아니다. 다른 종료 내용과 구 기기/epoch는 계속 거절한다.
 START·snapshot·종료의 서버 저장 메타 시각은 PostgreSQL과 동일한 microsecond 정밀도로 기록하여 최초 응답과 재조회/중복 ACK를 일치시킨다. 클라이언트 실제 발생 시각은 기존 millisecond 입력 그대로 보존하며 서버 시각으로 보정하지 않는다. 만료 여부는 정밀도를 줄이기 전 서버 Clock으로 판정한다.
 
 ### 종료 중복·revision
@@ -305,7 +312,7 @@ START·snapshot·종료의 서버 저장 메타 시각은 PostgreSQL과 동일�
 - FINISHED의 동일 `owner/generation/device/epoch/revision/canonical snapshot hash/endedAt`은200 duplicate=true다. 최초 평가·승인·수행·version·시각을 다시 저장하지 않는다.
 - 종료 식별에는 기존 snapshot hash·epoch·revision과 endedAt을 사용한다. 별도 finish 요청 ID·영구 영수증·추가 fingerprint 컬럼은 없다.
 - 다른 내용·종료 시각·revision의 finish는409 FINISH_REQUEST_MISMATCH, 구 기기/epoch는409 EDITOR_OWNERSHIP_LOST다. 동일 종료 재확인은 24시간 이후에도 최초 결과를 반환한다.
-- FINISHED 이후 일반 snapshot·takeover·승인 해결은409 SESSION_NOT_ACTIVE다. 보존 승인 결과는 상세 조회로 확인한다. 종료 후 승인 해결/수행 복구는 이번 범위가 아니다.
+- FINISHED 이후 일반 snapshot·takeover·ACTIVE 승인 해결은409 SESSION_NOT_ACTIVE다. 종료 후 승인 해결/수행 복구에는 별도 온라인 API를 사용한다. 논리 삭제된 세션의 일반 쓰기는409 SESSION_DELETED다.
 - AUTO_CLOSED에는 성공한 명시 finish가 없으므로409 SESSION_AUTO_CLOSED이며 허위 finish ACK를 만들지 않는다.
 
 ## 최초 공식 평가 — 확정 규칙
@@ -342,3 +349,87 @@ snapshot/finish/takeover/승인 해결에서 만료 전환은 트랜잭션 결�
 예약 작업은 기존 Spring @Scheduled로 시작 시 실행하고 기본 fixed delay60초다. `overload.workout.expiry.enabled=false`로 비활성화할 수 있고 `overload.workout.expiry.delay-ms`로 간격을 지정한다. 만료 기준24시간은 설정으로 바꾸지 않는다.
 후보는 잠그지 않고 최대1000개 조회하며 후보별 독립 트랜잭션에서 users FOR SHARE→session FOR UPDATE SKIP LOCKED 순으로 잠그고 재검사한다. 처리 실패는 경고를 기록하고 롤백하며 다음 실행에서 재시도한다. 기동 시 DB에서 만료 후보를 다시 읽으므로 별도 작업 영수증/메모리 만료 상태/분산 잠금은 없다.
 요청과 작업이 경합하면 세션 잠금 아래 최신 상태·기한을 재확인한다. 기한 전에 잠금을 얻어 유효성을 확인한 저장/종료와 만료 후 전이를 구분한다. AUTO_CLOSED 이후의 오래된 업로드는 결과를 덮어쓰거나 재개하지 못한다.
+
+## 종료 후 정정·삭제·복구 — V15
+
+FINISHED와 AUTO_CLOSED에만 허용한다. 로그인·CSRF·principal 소유권·현재 dataGeneration과 expectedVersion을 검증한다. ACTIVE writerEpoch/localRevision 계약을 사용하거나 해당 필드를 받지 않는다. 모든 Counter·Decimal·UUID·실제 발생 시각의 형식과 수치 범위는 V13과 동일하다. 추가/중복/누락 필드와 중복 대상 UUID는400 INVALID_REQUEST다. 모든 경로는 query를 받지 않는다.
+
+### 선택 수행 정정·삭제
+
+PATCH records의 정확한 필드:
+
+```json
+{
+  "dataGeneration":"0","expectedVersion":"7",
+  "setCorrections":[{"id":"11111111-1111-4111-8111-111111111111","weightKg":"62.5","reps":8}],
+  "cardioCorrections":[],"deletedPerformedSetIds":[],"deletedCardioResultIds":[]
+}
+```
+
+cardioCorrections의 항목은 `{id,activeMs,corrected,distanceKm,averageBpm}`이며 nullable 거리/심박을 명시한다. 타이머 원본은 입력받지 않는다. COMPLETED 수치만 정정하며 corrected=false이면 저장된 timerMs와 activeMs가 같아야 한다. 유산소 kind에 따른 거리 허용과 기존 범위도 검사한다.
+배열 네 개는 필수이며 적어도 한 대상을 지정한다. 같은 종류의 UUID를 정정/삭제 양쪽에 넣지 않는다. 누락된 수행은 변경하지 않는다. UUID·종목·ordinal·실제 완료 시각·원래 weightContext·최초 승인 상태/중량과 유산소 status/시작·완료 시각/timerMs는 변경하지 않는다.
+각 변경은 before/after 이력을 저장하고 논리 삭제는 deleted_at을 기록한다. 같은 값 정정이나 이미 삭제된 ID의 삭제 확인은 expectedVersion이 현재일 때 changed=false이며 이력·version을 추가하지 않는다. tombstone의 값 정정은422 RECORD_DELETED다.
+
+### 누락 완료 수행 복구
+
+POST recoveries의 정확한 필드:
+
+```json
+{
+  "dataGeneration":"0","expectedVersion":"8","confirm":true,
+  "origin":{"editorDeviceId":"22222222-2222-4222-8222-222222222222","writerEpoch":"0","localRevision":"12"},
+  "performedSets":[],"cardioResults":[]
+}
+```
+
+위 배열은 기존 V13 SetValue/Cardio 구조이며, 적어도 하나의 실제 완료 수행을 선택한다. 유산소는 COMPLETED만 허용하고 미완료/SKIPPED를 새로 만들지 않는다. 서버에 이미 등록된 같은 세션 종목만 대상으로 한다. 정의/원본 루틴이 나중에 삭제돼도 기존 registry와 보존 계획을 사용한다. 유산소 계획이 InitialPlan·봉인 AppliedPlan 어디에도 없어 검증할 수 없다면422 RECOVERY_CONTEXT_UNAVAILABLE다. 새 계획이나 종목을 받아 보완하지 않는다.
+confirm=true는 명시적 사용자 선택이다. origin은 원래 로컬 문맥을 보존하는 이력이며 인증·편집권 증명이 아니다. source epoch가 마지막 epoch보다 크거나, 알려진 최초/마지막 epoch의 기기와 모순되면422 INVALID_RECOVERY_ORIGIN이다. 중간 epoch의 기기 이력을 가지고 있다고 주장하지 않는다. 이전 epoch를 현재 epoch로 재태깅하거나 localRevision을 서버에 적용하지 않는다.
+
+FINISHED는 `startedAt <= completedAt/occurredAt <= endedAt`을 요구한다. AUTO_CLOSED는 시작 이후와 타이머·시각 선후 관계만 검사하며 closedAt 뒤의 실제 완료라는 이유만으로 거절하지 않는다. 클라이언트 원래 시각을 유지하고 서버 시각으로 보정하지 않는다. AUTO_CLOSED 상태·endedAt=null·completionAssessment=null은 그대로다.
+
+같은 UUID의 동일 수행은 alreadyPresentIds로 반환한다. 같은 UUID의 다른 값은409 RECORD_ID_CONFLICT, 기존 tombstone은422 RECORD_DELETED다. 다른 UUID가 유효 ordinal 또는 유산소 활동을 점유하면409 RECORD_SLOT_CONFLICT다. 자동 정정·병합·재번호·tombstone 해제는 하지 않는다. 한 항목이라도 실패하면 업로드 전체를 롤백한다. 원본은 향후 IndexedDB에 남겨 사용자가 다시 확인한다.
+
+복구 승인 문맥은 서버가 결정한다. 클라이언트가 승인 처리 상태나 승인 중량을 지정하지 않는다.
+
+- INITIAL_APPROVED: 보존 InitialPlan에 해당 종목이 있으면 그 승인값을 유지한다. 실제 중량이 다르면 현재 공식 평가에서 제외될 수 있다.
+- TODAY_ONLY: 기존 비승인 문맥을 유지한다.
+- APPROVAL_REQUEST: 같은 세션·종목의 보존 요청이 ACTIVE 중 생성된 APPLIED/PENDING이면 해당 사실을 유지하고 승인 시각 이후 수행인지 검사한다. 현재 루틴 승인값을 읽어 대신 쓰지 않는다.
+- 확인할 수 없는 주장, 이미 해결되어 당시 상태를 확인할 수 없는 요청, 종료 후 새 재승인을 근거로 한 주장은 UNVERIFIED로 저장한다. 원래 Context와 관련 UUID는 복구 사건 changeContext.claimedWeightContext에 보존한다. 실제 수행 행의 context_kind/approval_state_at_recording은 UNVERIFIED, 승인 FK·승인값은 null이다.
+
+UNVERIFIED/null 참조를 명시적으로 제출할 수도 있다. 상세 snapshot의 weightContext.kind와 recordedContexts.approvalStateAtRecording에도 UNVERIFIED가 추가된다. 이는 복구/조회 계약 확장이며 ACTIVE snapshot의 허용 입력은 기존 세 가지다. UNVERIFIED를 첫 N개에서 건너뛰거나 이후 승인으로 정상화하지 않는다.
+
+### 세션 전체 논리 삭제
+
+DELETE body는 정확히 `{dataGeneration,expectedVersion}`이다. 세션 deletedAt만 기록하고 상태·종료 메타·계획·최초 평가·하위 수행·승인 사건은 보존한다. SESSION/DELETED 사건을 하나 기록한다. 상세 GET은 본인 tombstone과 보존 사실을 반환한다. deletedAt이 있으면 수정·복구·승인 해결을 거절하고 현재 공식 평가/다른 세션의 비교 후보에서 제외한다. 원래 FINISH 확인 외 일반 쓰기는 SESSION_DELETED다. 전체 삭제 해제 API는 제공하지 않는다.
+
+정정·복구·전체 삭제의 정확한 성공 응답:
+
+```text
+{userId,dataGeneration,sessionId,status,version,changed,changeEventIds:[UUID],
+ recoveredIds:[UUID],alreadyPresentIds:[UUID],deletedAt:Instant|null}
+```
+
+### 종료 후 PENDING 해결
+
+POST closed-approval-resolutions body는 `{dataGeneration,expectedVersion,sessionExerciseId,pendingRequestIds,decision,occurredAt,newApprovalRequest}`다. newApprovalRequest의 키와 KEEP_CURRENT/REAPPROVE 의미는 ACTIVE 해결과 동일하다. 해당 종목의 현재 PENDING 전체를 명시해야 하며 재승인은 현재 루틴 version/승인값·활성 출처를 검증한 새 UUID/시각/순번이다.
+성공 응답은 `{userId,dataGeneration,sessionId,status,version,changed,approvalResults}`다. 기존 요청의 NOT_APPLIED/해결 시각/새 참조는 보존한다. 종료 후 생성된 요청은 created_after_closure=true로 구분하여 이후 복구의 과거 정상 승인 근거로 사용하지 않는다. 기존 수행 문맥과 최초 평가는 변경하지 않는다. 값이 같은 명시 재승인도 요청 사실은 보존하며 실제 중량 변화가 있을 때만 기존 V11 방식의 승인 사건과 루틴 version 변경을 만든다.
+
+### 현재 평가·변경 이력 조회
+
+```text
+GET assessment -> {userId,dataGeneration,sessionId,status,version,completionAssessment,
+ currentAssessment:{state:"EVALUATED"|"EXCLUDED",reasonCodes:[String],advice:null|"UNAVAILABLE",evaluation:CompletionAssessment|null}}
+GET record-change-events -> {userId,dataGeneration,sessionId,version,events:[
+ {id,recordKind:"SET"|"CARDIO"|"SESSION",recordId,changeKind:"CORRECTED"|"DELETED"|"RECOVERED",
+  before:Object|null,after:Object|null,changeContext:Object|null,recordedAt}]}
+```
+
+현재 평가는 readOnly REPEATABLE_READ 한 트랜잭션에서 수행과 과거 후보의 현재 유효 사실을 재평가한다. 기존 첫 N개/순위/시간 조건/권고 규칙과 버전을 유지한다. 과거 후보를 정정·삭제하면 다음 조회에 반영되지만 최초 평가를 연쇄 변경하지 않는다. 평가 JSONB/캐시/백그라운드 재계산 테이블은 없다. 비교 후보 변경은 대상 세션 자체 version을 바꾸지 않으므로 그 version만을 전체 평가 캐시 key로 사용하지 않는다.
+AUTO_CLOSED/삭제 세션은 EXCLUDED, 이유 AUTO_CLOSED/SESSION_DELETED, advice=UNAVAILABLE, evaluation=null이다. 최초 평가가 없던 AUTO_CLOSED에는 계속 null이다. ACTIVE 평가 조회는409 SESSION_NOT_CLOSED다. 이력은 본인 세션의 운동 중 이력까지 포함하고 recordedAt ASC→UUID ASC로 전체 반환한다. 전역 feed/cursor가 아니다.
+새 사건 changeContext는 `{schemaVersion:1,sessionVersion:Counter,origin?:Origin,claimedWeightContext?:Context}`다. 기존 V13 사건은 context=null 그대로다. RECOVERED는 before=null/after=추가 수행, 삭제 수행은 tombstone과 before를 보존한다. 계정은 불변 session 소유권으로 확인하며 기기 값은 원본 주장으로만 표시한다.
+
+### 동시성·롤백·응답 유실
+
+실제 변경 트랜잭션당 세션 version/updatedAt만 한 번 갱신한다. InitialPlan·봉인 AppliedPlan·최초 평가·종료 시각·writerEpoch·localRevision·hash·lastSnapshotSavedAt·lastWorkoutSyncedAt은 변경하지 않는다. stale expectedVersion은 무변경/동일 재요청에도409 SESSION_VERSION_CONFLICT다. ACK 유실 시 상세·이력·승인 해결 사실을 재조회하고 사용자 확인 없이 새 version을 붙여 재적용하지 않는다. 새 영구 요청 영수증은 없다.
+일반 정정/복구/삭제는 users FOR SHARE→session FOR UPDATE, 재승인은 users→routine FOR UPDATE→session 순서다. 기존 정의 잠금이 필요한 ACTIVE/루틴 경로의 UUID순 규칙은 유지하며 세션을 잠근 뒤 루틴을 잠그지 않는다. JPA/JDBC workoutTransactionManager 하나에서 수행·이력·승인·version을 원자 처리한다. DB 실패는 전체 롤백하며 PENDING으로 위장하지 않는다.
+추가 오류는409 SESSION_NOT_CLOSED/SESSION_DELETED/SESSION_VERSION_CONFLICT/RECORD_SLOT_CONFLICT와422 RECOVERY_CONTEXT_UNAVAILABLE/INVALID_RECOVERY_ORIGIN이다. 기존404 RECORD_NOT_FOUND·409 SOURCE_NOT_APPROVABLE/RESOLUTION_CONFLICT·422 RECORD_DELETED/CLOCK_CONTEXT_INVALID 및 인증·CSRF·소유권·세대·503 경계를 유지한다.

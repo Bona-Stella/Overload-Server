@@ -20,7 +20,7 @@ public class WorkoutSessionRepository {
         return jdbc.queryForObject("SELECT EXISTS(SELECT 1 FROM workout_sessions WHERE user_id=? AND data_generation=? AND id=?)",Boolean.class,owner,generation,id);
     }
     List<WorkoutSession> finishedBefore(WorkoutSession current) {
-        return entityManager.createQuery("select s from WorkoutSession s where s.userId=:u and s.dataGeneration=:g and s.status='FINISHED' and s.id<>:id and s.endedAt<=:start order by s.id",WorkoutSession.class)
+        return entityManager.createQuery("select s from WorkoutSession s where s.userId=:u and s.dataGeneration=:g and s.status='FINISHED' and s.deletedAt is null and s.id<>:id and s.endedAt<=:start order by s.id",WorkoutSession.class)
                 .setParameter("u",current.userId).setParameter("g",current.dataGeneration).setParameter("id",current.id).setParameter("start",current.startedAt).getResultList();
     }
     List<ExpiryCandidate> expiryCandidates(Instant cutoff) {

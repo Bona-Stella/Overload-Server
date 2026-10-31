@@ -31,6 +31,9 @@ public class WorkoutSnapshotRepository {
     List<WeightApprovalRequest> approvals(UUID session) {
         return em.createQuery("select e from WeightApprovalRequest e where e.sessionId=:id order by e.exerciseId,e.sequence", WeightApprovalRequest.class).setParameter("id", session).getResultList();
     }
+    List<RecordChangeEvent> changes(UUID session) {
+        return em.createQuery("select e from RecordChangeEvent e where e.sessionId=:id order by e.recordedAt,e.id",RecordChangeEvent.class).setParameter("id",session).getResultList();
+    }
     boolean occupied(String table, UUID id) {
         return jdbc.queryForObject("SELECT EXISTS(SELECT 1 FROM "+table+" WHERE id=?)", Boolean.class, id);
     }

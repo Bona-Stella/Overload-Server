@@ -52,7 +52,8 @@ public class WorkoutSnapshotService {
         var result=transaction(()->{
             Save state=input.state();
             var locked=lock(owner,id,state);var session=locked.session();
-            if (expired(session)) return null;
+            // Original FINISH confirmation is read-only even after explicit record deletion.
+            if (!session.status.equals("FINISHED")&&expired(session)) return null;
             if (session.writerEpoch!=state.writerEpoch()||!session.editorDeviceId.equals(state.editorDeviceId())) throw failure(EDITOR_OWNERSHIP_LOST);
             if (session.status.equals("FINISHED")) {
                 if (session.localRevision!=state.localRevision()||!hash(state).equals(session.lastSnapshotHash)||!input.endedAt().equals(session.endedAt)) throw failure(FINISH_REQUEST_MISMATCH);
@@ -78,7 +79,7 @@ public class WorkoutSnapshotService {
     private FinishAck finishAck(WorkoutSession session,boolean duplicate) {
         var assessment=JSON.readValue(session.completionAssessment,WorkoutAssessment.Result.class);
         return new FinishAck(session.userId,Long.toString(session.dataGeneration),session.id,session.status,Long.toString(session.writerEpoch),
-                Long.toString(session.localRevision),assessment.sessionVersion(),session.lastSnapshotSavedAt,session.lastWorkoutSyncedAt,
+                Long.toString(session.localRevision),assessment.sessionVersion(),Long.toString(session.version),session.deletedAt,session.lastSnapshotSavedAt,session.lastWorkoutSyncedAt,
                 session.endedAt,session.closedAt,duplicate,data.results(session.id,data.approvals(session.id)),assessment);
     }
 
@@ -95,6 +96,7 @@ public class WorkoutSnapshotService {
     }
 
     private boolean expired(WorkoutSession session) {
+        if(session.deletedAt!=null)throw failure(SESSION_DELETED);
         if (session.expireIfDue(clock.instant())) data.flush();
         return session.status.equals("AUTO_CLOSED");
     }
@@ -155,57 +157,79 @@ public class WorkoutSnapshotService {
             UUID source = data.source(owner, input.dataGeneration(), id);
             var scope = input.decision().equals("REAPPROVE")?routines.lockForWorkoutApproval(owner, input.dataGeneration(), source):null;
             var session = find(owner, input.dataGeneration(), id);
+            if(session.deletedAt!=null)throw failure(SESSION_DELETED);
             if (session.expireIfDue(clock.instant())) { data.flush(); return null; }
             if (session.status.equals("AUTO_CLOSED")) return null;
             guard(session, input.editorDeviceId(), input.writerEpoch());
-            var requests = index(data.approvals(id), r -> r.id);
-            var selected = new ArrayList<WeightApprovalRequest>();
-            for (UUID request:input.pendingRequestIds()) {
-                var row = requests.get(request);
-                if (row==null||!row.exerciseId.equals(input.sessionExerciseId()))throw failure(RESOLUTION_CONFLICT);
-                selected.add(row);
-            }
-            // KEEP_CURRENT needs no receipt: immutable resolution facts remain queryable in the session.
-            boolean confirmed = selected.stream().allMatch(r -> "NOT_APPLIED".equals(r.status)&&Objects.equals(r.resolvedAt, input.occurredAt())
-                &&(input.newApprovalRequest()==null?"KEPT_CURRENT".equals(r.reason)&&r.resolvedBy==null:
-                "REAPPROVED".equals(r.reason)&&input.newApprovalRequest().id().equals(r.resolvedBy)));
-            if (confirmed) {
-                if (input.newApprovalRequest()!=null) {
-                    var row = requests.get(input.newApprovalRequest().id());
-                    if (row==null||!row.value().equals(input.newApprovalRequest()))throw failure(APPROVAL_REQUEST_ID_CONFLICT);
-                }
-                return resolution(session);
-            }
-            if (session.version!=input.expectedSessionVersion()||session.localRevision!=input.expectedLocalRevision())throw failure(RESOLUTION_CONFLICT);
-            var pending = requests.values().stream().filter(r -> r.exerciseId.equals(input.sessionExerciseId())&&r.status.equals("PENDING")).map(r -> r.id).collect(Collectors.toSet());
-            if (!pending.equals(new HashSet<>(input.pendingRequestIds())))throw failure(RESOLUTION_CONFLICT);
-            incrementable(session);
-            afterStart(session, input.occurredAt());
-            for (var row:selected)if (input.occurredAt().isBefore(row.occurredAt))throw failure(CLOCK_CONTEXT_INVALID);
-            if (input.newApprovalRequest()!=null) {
-                var initial = initialWeight(session, input.sessionExerciseId());
-                if (initial==null||!scope.available(initial.sourcePlacementId()))throw failure(SOURCE_NOT_APPROVABLE);
-                if (scope.version()!=input.newApprovalRequest().expectedRoutineVersion()
-                    ||scope.weight(initial.sourcePlacementId()).compareTo(new BigDecimal(input.newApprovalRequest().previousApprovedWeightKg()))!=0)throw failure(RESOLUTION_CONFLICT);
-            }
-            for (var row:selected) {
-                row.status = "NOT_APPLIED";
-                row.reason = input.newApprovalRequest()==null?"KEPT_CURRENT":"REAPPROVED";
-                row.resolvedAt = input.occurredAt();
-                row.resolvedBy = input.newApprovalRequest()==null?null:input.newApprovalRequest().id();
-            }
-            if (input.newApprovalRequest()!=null) {
-                var added = approvals(session, List.of(input.newApprovalRequest()), index(data.exercises(id), e -> e.id), requests, scope, true);
-                if (added.size()!=1)throw failure(RESOLUTION_CONFLICT);
-                completeApprovals(scope, added);
-            }
-            session.version++;
-            session.updatedAt = clock.instant();
-            data.flush();
-            return resolution(session);
-            });
+            return resolveLocked(session,input,scope);
+        });
         if (result==null) throw failure(SESSION_AUTO_CLOSED);
         return result;
+    }
+
+    WorkoutRecordData.ResolutionAck resolveClosed(UUID owner,UUID id,WorkoutRecordData.ClosedResolve input) {
+        return transaction(()->{
+            owner(owner,input.scope().dataGeneration());
+            UUID source=data.source(owner,input.scope().dataGeneration(),id);
+            var scope=input.newApprovalRequest()==null?null:routines.lockForWorkoutApproval(owner,input.scope().dataGeneration(),source);
+            var session=find(owner,input.scope().dataGeneration(),id);
+            WorkoutRecordService.closed(session,input.scope().expectedVersion());
+            long before=session.version;
+            var request=new Resolve(input.scope().dataGeneration(),session.editorDeviceId,session.writerEpoch,session.version,
+                    session.localRevision,input.sessionExerciseId(),input.pendingRequestIds(),input.decision(),input.occurredAt(),input.newApprovalRequest());
+            var result=resolveLocked(session,request,scope);
+            return new WorkoutRecordData.ResolutionAck(owner,Long.toString(session.dataGeneration),id,session.status,
+                    Long.toString(session.version),before!=session.version,result.approvalResults());
+        });
+    }
+
+    private Resolution resolveLocked(WorkoutSession session,Resolve input,RoutineRepository.ApprovalScope scope) {
+        UUID id=session.id;
+        var requests = index(data.approvals(id), r -> r.id);
+        var selected = new ArrayList<WeightApprovalRequest>();
+        for (UUID request:input.pendingRequestIds()) {
+            var row = requests.get(request);
+            if (row==null||!row.exerciseId.equals(input.sessionExerciseId()))throw failure(RESOLUTION_CONFLICT);
+            selected.add(row);
+        }
+        // KEEP_CURRENT needs no receipt: immutable resolution facts remain queryable in the session.
+        boolean confirmed = selected.stream().allMatch(r -> "NOT_APPLIED".equals(r.status)&&Objects.equals(r.resolvedAt, input.occurredAt())
+            &&(input.newApprovalRequest()==null?"KEPT_CURRENT".equals(r.reason)&&r.resolvedBy==null:
+            "REAPPROVED".equals(r.reason)&&input.newApprovalRequest().id().equals(r.resolvedBy)));
+        if (confirmed) {
+            if (input.newApprovalRequest()!=null) {
+                var row = requests.get(input.newApprovalRequest().id());
+                if (row==null||!row.value().equals(input.newApprovalRequest()))throw failure(APPROVAL_REQUEST_ID_CONFLICT);
+            }
+            return resolution(session);
+        }
+        if (session.version!=input.expectedSessionVersion()||session.localRevision!=input.expectedLocalRevision())throw failure(RESOLUTION_CONFLICT);
+        var pending = requests.values().stream().filter(r -> r.exerciseId.equals(input.sessionExerciseId())&&r.status.equals("PENDING")).map(r -> r.id).collect(Collectors.toSet());
+        if (!pending.equals(new HashSet<>(input.pendingRequestIds())))throw failure(RESOLUTION_CONFLICT);
+        incrementable(session);
+        afterStart(session, input.occurredAt());
+        for (var row:selected)if (input.occurredAt().isBefore(row.occurredAt))throw failure(CLOCK_CONTEXT_INVALID);
+        if (input.newApprovalRequest()!=null) {
+            var initial = initialWeight(session, input.sessionExerciseId());
+            if (initial==null||!scope.available(initial.sourcePlacementId()))throw failure(SOURCE_NOT_APPROVABLE);
+            if (scope.version()!=input.newApprovalRequest().expectedRoutineVersion()
+                ||scope.weight(initial.sourcePlacementId()).compareTo(new BigDecimal(input.newApprovalRequest().previousApprovedWeightKg()))!=0)throw failure(RESOLUTION_CONFLICT);
+        }
+        for (var row:selected) {
+            row.status = "NOT_APPLIED";
+            row.reason = input.newApprovalRequest()==null?"KEPT_CURRENT":"REAPPROVED";
+            row.resolvedAt = input.occurredAt();
+            row.resolvedBy = input.newApprovalRequest()==null?null:input.newApprovalRequest().id();
+        }
+        if (input.newApprovalRequest()!=null) {
+            var added = approvals(session, List.of(input.newApprovalRequest()), index(data.exercises(id), e -> e.id), requests, scope, true);
+            if (added.size()!=1)throw failure(RESOLUTION_CONFLICT);
+            completeApprovals(scope, added);
+        }
+        session.version++;
+        session.updatedAt = clock.instant();
+        data.flush();
+        return resolution(session);
     }
 
     private List<WeightApprovalRequest> approvals(WorkoutSession session, List<Approval> inputs, Map<UUID, SessionExercise> items,
@@ -231,6 +255,7 @@ public class WorkoutSnapshotService {
                 ||previous.nextWeight.compareTo(new BigDecimal(input.previousApprovedWeightKg()))!=0))throw failure(INVALID_SNAPSHOT);
             if (previous!=null&&input.occurredAt().isBefore(previous.occurredAt))throw failure(CLOCK_CONTEXT_INVALID);
             var row = new WeightApprovalRequest(session.id, input);
+            row.createdAfterClosure=!session.status.equals("ACTIVE");
             var initial = initialWeight(session, row.exerciseId);
             String reason = null;
             if (initial==null)reason = "NO_SOURCE_PLACEMENT";
@@ -340,17 +365,8 @@ public class WorkoutSnapshotService {
         var activities = new HashSet<UUID>();
         for (var input:state.cardioResults()) {
             item(items, input.sessionActivityId(), "CARDIO");
-            afterStart(session, input.occurredAt());
             if (!activities.add(input.sessionActivityId()))throw failure(INVALID_SNAPSHOT);
-            if (input.startedAt()!=null) {
-                afterStart(session, input.startedAt());
-                if (input.occurredAt().isBefore(input.startedAt()))throw failure(CLOCK_CONTEXT_INVALID);
-            }
-            if (input.result()!=null) {
-                if (input.result().timerMs()>Duration.between(input.startedAt(), input.occurredAt()).toMillis())throw failure(CLOCK_CONTEXT_INVALID);
-                String kind = plannedCardio.get(input.sessionActivityId()).plan().get("kind").asString();
-                if (input.result().distanceKm()!=null&&!Set.of("TREADMILL", "BIKE", "OUTDOOR").contains(kind))throw failure(INVALID_SNAPSHOT);
-            }
+            validateCardio(session,input,plannedCardio.get(input.sessionActivityId()).plan());
             var row = oldCardio.get(input.id());
             if (row!=null) {
                 if (row.deletedAt!=null)throw failure(RECORD_DELETED);
@@ -372,7 +388,19 @@ public class WorkoutSnapshotService {
         return changed;
     }
 
-    private void context(WorkoutSession session, PerformedSet set, Map<UUID, WeightApprovalRequest> requests) {
+    static void validateCardio(WorkoutSession session,Cardio input,tools.jackson.databind.JsonNode plan) {
+        afterStart(session,input.occurredAt());
+        if(input.startedAt()!=null) {
+            afterStart(session,input.startedAt());
+            if(input.occurredAt().isBefore(input.startedAt()))throw failure(CLOCK_CONTEXT_INVALID);
+        }
+        if(input.result()!=null) {
+            if(input.result().timerMs()>Duration.between(input.startedAt(),input.occurredAt()).toMillis())throw failure(CLOCK_CONTEXT_INVALID);
+            if(input.result().distanceKm()!=null&&!Set.of("TREADMILL","BIKE","OUTDOOR").contains(plan.get("kind").asString()))throw failure(INVALID_SNAPSHOT);
+        }
+    }
+
+    static void context(WorkoutSession session, PerformedSet set, Map<UUID, WeightApprovalRequest> requests) {
         if (set.contextKind.equals("INITIAL_APPROVED")) {
             var initial = initialWeight(session, set.exerciseId);
             if (initial==null)throw failure(INVALID_SNAPSHOT);
@@ -404,7 +432,7 @@ public class WorkoutSnapshotService {
         data.insert(new RecordChangeEvent(s.id, kind, id, before, after, clock.instant()));
     }
 
-    private static InitialPlan.Weight initialWeight(WorkoutSession s, UUID id) {
+    static InitialPlan.Weight initialWeight(WorkoutSession s, UUID id) {
         return InitialPlan.read(s.initialPlan).weightExercises().stream().filter(p -> p.sessionExerciseId().equals(id)).findFirst().orElse(null);
     }
 
@@ -423,6 +451,7 @@ public class WorkoutSnapshotService {
     }
 
     private static void guard(WorkoutSession s, UUID device, long epoch) {
+        if(s.deletedAt!=null)throw failure(SESSION_DELETED);
         if (!s.status.equals("ACTIVE"))throw failure(SESSION_NOT_ACTIVE);
         if (s.writerEpoch!=epoch||!s.editorDeviceId.equals(device))throw failure(EDITOR_OWNERSHIP_LOST);
     }

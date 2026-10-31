@@ -52,38 +52,9 @@ final class WorkoutSnapshotRequests {
         }
         if (weights.isEmpty()&&cardioPlans.isEmpty()) throw invalid();
         var sets = new ArrayList<SetValue>();
-        for (var p:array(s, "performedSets")) {
-            fields(p, "id", "sessionExerciseId", "ordinal", "weightKg", "reps", "completedAt", "weightContext");
-            var context = p.get("weightContext");
-            fields(context, "kind", "requestId");
-            String kind = text(context, "kind");
-            UUID request = nullableUuid(context, "requestId");
-            if (!Set.of("INITIAL_APPROVED", "APPROVAL_REQUEST", "TODAY_ONLY").contains(kind)||(kind.equals("APPROVAL_REQUEST")!=(request!=null))) throw invalid();
-            sets.add(new SetValue(uuid(p, "id"), uuid(p, "sessionExerciseId"), count(p, "ordinal"), decimal(p, "weightKg"), count(p, "reps"), time(p, "completedAt"), new Context(kind, request)));
-        }
+        for (var p:array(s, "performedSets")) sets.add(set(p,false));
         var cardio = new ArrayList<Cardio>();
-        for (var p:array(s, "cardioResults")) {
-            fields(p, "id", "sessionActivityId", "status", "startedAt", "occurredAt", "result");
-            String status = text(p, "status");
-            Instant started = p.get("startedAt").isNull()?null:time(p, "startedAt");
-            CardioValue result = null;
-            var r = p.get("result");
-            if (status.equals("COMPLETED")) {
-                fields(r, "timerMs", "activeMs", "corrected", "distanceKm", "averageBpm");
-                if (started==null) throw invalid();
-                long timer = duration(r, "timerMs", 0, 9007199254740991L), active = duration(r, "activeMs", 1, 86400000);
-                if (!r.get("corrected").isBoolean()) throw invalid();
-                boolean corrected = r.get("corrected").asBoolean();
-                if (!corrected&&timer!=active) throw invalid();
-                String distance = r.get("distanceKm").isNull()?null:decimal(r, "distanceKm");
-                if (distance!=null&&(new BigDecimal(distance).compareTo(new BigDecimal("0.001"))<0||new BigDecimal(distance).compareTo(new BigDecimal("1000"))>0)) throw invalid();
-                Integer bpm = r.get("averageBpm").isNull()?null:count(r, "averageBpm");
-                if (bpm!=null&&(bpm<20||bpm>300)) throw invalid();
-                result = new CardioValue(timer, active, corrected, distance, bpm);
-            }
-            else if (!status.equals("SKIPPED")||!r.isNull()) throw invalid();
-            cardio.add(new Cardio(uuid(p, "id"), uuid(p, "sessionActivityId"), status, started, time(p, "occurredAt"), result));
-        }
+        for (var p:array(s, "cardioResults")) cardio.add(cardio(p));
         var approvals = new ArrayList<Approval>();
         for (var p:array(s, "approvalRequests")) approvals.add(approval(p));
         unique(identities.stream().map(Exercise::id).toList());
@@ -100,6 +71,41 @@ final class WorkoutSnapshotRequests {
             new State(List.copyOf(identities), new Plan(1, List.copyOf(weights), List.copyOf(cardioPlans)), List.copyOf(sets), List.copyOf(cardio), ids(s, "deletedPerformedSetIds"), ids(s, "deletedCardioResultIds"), List.copyOf(approvals)));
     }
 
+    static SetValue set(JsonNode p,boolean recovery) {
+        fields(p, "id", "sessionExerciseId", "ordinal", "weightKg", "reps", "completedAt", "weightContext");
+        var context = p.get("weightContext");
+        fields(context, "kind", "requestId");
+        String kind = text(context, "kind");
+        UUID request = nullableUuid(context, "requestId");
+        if (!(Set.of("INITIAL_APPROVED", "APPROVAL_REQUEST", "TODAY_ONLY").contains(kind)||recovery&&kind.equals("UNVERIFIED"))||(kind.equals("APPROVAL_REQUEST")!=(request!=null))) throw invalid();
+        return new SetValue(uuid(p, "id"), uuid(p, "sessionExerciseId"), count(p, "ordinal"), decimal(p, "weightKg"), count(p, "reps"), time(p, "completedAt"), new Context(kind, request));
+    }
+    static Cardio cardio(JsonNode p) {
+        fields(p, "id", "sessionActivityId", "status", "startedAt", "occurredAt", "result");
+        String status = text(p, "status");
+        Instant started = p.get("startedAt").isNull()?null:time(p, "startedAt");
+        CardioValue result = null;
+        var r = p.get("result");
+        if (status.equals("COMPLETED")) {
+            fields(r, "timerMs", "activeMs", "corrected", "distanceKm", "averageBpm");
+            if (started==null) throw invalid();
+            result=cardioNumbers(r,duration(r,"timerMs",0,9007199254740991L));
+        }
+        else if (!status.equals("SKIPPED")||!r.isNull()) throw invalid();
+        return new Cardio(uuid(p, "id"), uuid(p, "sessionActivityId"), status, started, time(p, "occurredAt"), result);
+    }
+    static CardioValue cardioNumbers(JsonNode r,Long timer) {
+        long active = duration(r, "activeMs", 1, 86400000);
+        if (!r.get("corrected").isBoolean()) throw invalid();
+        boolean corrected = r.get("corrected").asBoolean();
+        if (timer!=null&&!corrected&&timer!=active) throw invalid();
+        String distance = r.get("distanceKm").isNull()?null:decimal(r, "distanceKm");
+        if (distance!=null&&(new BigDecimal(distance).compareTo(new BigDecimal("0.001"))<0||new BigDecimal(distance).compareTo(new BigDecimal("1000"))>0)) throw invalid();
+        Integer bpm = r.get("averageBpm").isNull()?null:count(r, "averageBpm");
+        if (bpm!=null&&(bpm<20||bpm>300)) throw invalid();
+        return new CardioValue(timer, active, corrected, distance, bpm);
+    }
+
     static Resolve resolve(String raw) {
         var b = parse(raw);
         fields(b, "dataGeneration", "editorDeviceId", "writerEpoch", "expectedSessionVersion", "expectedLocalRevision", "sessionExerciseId", "pendingRequestIds", "decision", "occurredAt", "newApprovalRequest");
@@ -108,6 +114,9 @@ final class WorkoutSnapshotRequests {
         if (ids.isEmpty()) throw invalid();
         String decision = text(b, "decision");
         Instant occurred = time(b, "occurredAt");
+        return new Resolve(counter(b, "dataGeneration"), uuid(b, "editorDeviceId"), counter(b, "writerEpoch"), counter(b, "expectedSessionVersion"), counter(b, "expectedLocalRevision"), exercise, ids, decision, occurred, reapproval(b,exercise,occurred,decision));
+    }
+    static Approval reapproval(JsonNode b,UUID exercise,Instant occurred,String decision) {
         Approval next = null;
         var n = b.get("newApprovalRequest");
         if (decision.equals("REAPPROVE")) {
@@ -117,17 +126,17 @@ final class WorkoutSnapshotRequests {
             next = new Approval(uuid(n, "id"), exercise, seq, null, counter(n, "expectedRoutineVersion"), decimal(n, "previousApprovedWeightKg"), decimal(n, "nextApprovedWeightKg"), occurred);
         }
         else if (!decision.equals("KEEP_CURRENT")||!n.isNull()) throw invalid();
-        return new Resolve(counter(b, "dataGeneration"), uuid(b, "editorDeviceId"), counter(b, "writerEpoch"), counter(b, "expectedSessionVersion"), counter(b, "expectedLocalRevision"), exercise, ids, decision, occurred, next);
+        return next;
     }
 
-    private static Approval approval(JsonNode p) {
+    static Approval approval(JsonNode p) {
         fields(p, "id", "sessionExerciseId", "sequence", "previousRequestId", "expectedRoutineVersion", "previousApprovedWeightKg", "nextApprovedWeightKg", "occurredAt");
         long seq = counter(p, "sequence");
         if (seq==0) throw invalid();
         return new Approval(uuid(p, "id"), uuid(p, "sessionExerciseId"), seq, nullableUuid(p, "previousRequestId"), counter(p, "expectedRoutineVersion"), decimal(p, "previousApprovedWeightKg"), decimal(p, "nextApprovedWeightKg"), time(p, "occurredAt"));
     }
 
-    private static JsonNode parse(String raw) {
+    static JsonNode parse(String raw) {
         try(var p = JSON.createParser(raw)) {
             JsonNode b = JSON.readTree(p);
             if (p.nextToken()!=null)throw invalid();
@@ -138,35 +147,35 @@ final class WorkoutSnapshotRequests {
         }
     }
 
-    private static void fields(JsonNode p, String... names) {
+    static void fields(JsonNode p, String... names) {
         if (p==null||!p.isObject()||p.size()!=names.length)throw invalid();
         var allowed = Set.of(names);
         for (String n:p.propertyNames())if (!allowed.contains(n))throw invalid();
     }
 
-    private static Iterable<JsonNode> array(JsonNode p, String n) {
+    static Iterable<JsonNode> array(JsonNode p, String n) {
         var a = p.get(n);
         if (a==null||!a.isArray())throw invalid();
         return a;
     }
 
-    private static String text(JsonNode p, String n) {
+    static String text(JsonNode p, String n) {
         var v = p.get(n);
         if (v==null||!v.isString())throw invalid();
         return v.asString();
     }
 
-    private static UUID uuid(JsonNode p, String n) {
+    static UUID uuid(JsonNode p, String n) {
         return WorkoutSessionRequests.uuid(text(p, n));
     }
 
-    private static UUID nullableUuid(JsonNode p, String n) {
+    static UUID nullableUuid(JsonNode p, String n) {
         var v = p.get(n);
         if (v==null)throw invalid();
         return v.isNull()?null:uuid(p, n);
     }
 
-    private static long counter(JsonNode p, String n) {
+    static long counter(JsonNode p, String n) {
         String s = text(p, n);
         if (!s.matches("0|[1-9][0-9]{0,18}"))throw invalid();
         try {
@@ -177,25 +186,25 @@ final class WorkoutSnapshotRequests {
         }
     }
 
-    private static int count(JsonNode p, String n) {
+    static int count(JsonNode p, String n) {
         var v = p.get(n);
         if (v==null||!v.isIntegralNumber()||!v.canConvertToInt()||v.intValue()<1)throw invalid();
         return v.intValue();
     }
 
-    private static long duration(JsonNode p, String n, long min, long max) {
+    static long duration(JsonNode p, String n, long min, long max) {
         var v = p.get(n);
         if (v==null||!v.isIntegralNumber()||!v.canConvertToLong()||v.longValue()<min||v.longValue()>max)throw invalid();
         return v.longValue();
     }
 
-    private static String decimal(JsonNode p, String n) {
+    static String decimal(JsonNode p, String n) {
         String s = text(p, n);
         if (!s.matches("(?:0|[1-9][0-9]{0,13})(?:\\.[0-9]{0,5}[1-9])?"))throw invalid();
         return s;
     }
 
-    private static Instant time(JsonNode p, String n) {
+    static Instant time(JsonNode p, String n) {
         String s = text(p, n);
         if (!s.matches("[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,3})?Z")||s.startsWith("0000"))throw invalid();
         try {
@@ -206,7 +215,7 @@ final class WorkoutSnapshotRequests {
         }
     }
 
-    private static List<UUID> ids(JsonNode p, String n) {
+    static List<UUID> ids(JsonNode p, String n) {
         var r = new ArrayList<UUID>();
         for (var v:array(p, n)) {
             if (!v.isString())throw invalid();
@@ -217,11 +226,11 @@ final class WorkoutSnapshotRequests {
         return List.copyOf(r);
     }
 
-    private static void unique(List<UUID> ids) {
+    static void unique(List<UUID> ids) {
         if (new HashSet<>(ids).size()!=ids.size())throw invalid();
     }
 
-    private static WorkoutSessionFailure invalid() {
+    static WorkoutSessionFailure invalid() {
         return new WorkoutSessionFailure(INVALID_REQUEST);
     }
 }

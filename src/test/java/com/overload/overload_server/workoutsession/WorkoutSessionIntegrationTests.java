@@ -139,7 +139,7 @@ class WorkoutSessionIntegrationTests {
         error(browser.get(path() + "?editorDeviceId=" + device), 400, "INVALID_REQUEST");
         error(browser.send("GET", path(), "{}", null), 400, "INVALID_REQUEST");
         error(browser.get(BASE + "/bad-id"), 400, "INVALID_REQUEST");
-        assertThat(browser.send("DELETE", path(), "{}", csrf).statusCode()).isEqualTo(405);
+        assertThat(browser.send("PUT", path(), "{}", csrf).statusCode()).isEqualTo(405);
         assertThat(row()).isEqualTo(before);
     }
 
@@ -157,7 +157,7 @@ class WorkoutSessionIntegrationTests {
         assertThatThrownBy(() -> jdbc.update("UPDATE workout_sessions SET initial_plan_snapshot=initial_plan_snapshot || '{\"routineName\":\"tampered\"}'::jsonb WHERE id=?", session)).isInstanceOf(DataIntegrityViolationException.class);
         assertThatThrownBy(() -> jdbc.update("UPDATE workout_sessions SET started_at=started_at+interval '1 second' WHERE id=?", session)).isInstanceOf(DataIntegrityViolationException.class);
         assertThatThrownBy(() -> jdbc.update("UPDATE users SET data_generation=1 WHERE id=?", owner.id())).isInstanceOf(DataIntegrityViolationException.class);
-        assertThatThrownBy(() -> jdbc.update("INSERT INTO workout_sessions SELECT ?,user_id,data_generation,source_routine_id,status,version,started_at,workout_date,started_time_zone,started_device_id,editor_device_id,writer_epoch,local_revision,initial_plan_snapshot,last_workout_synced_at,created_at,updated_at,applied_plan_snapshot,last_snapshot_hash,last_snapshot_saved_at,ended_at,closed_at,completion_assessment_snapshot FROM workout_sessions WHERE id=?", UUID.randomUUID(), session)).isInstanceOf(DataIntegrityViolationException.class);
+        assertThatThrownBy(() -> jdbc.update("INSERT INTO workout_sessions SELECT ?,user_id,data_generation,source_routine_id,status,version,started_at,workout_date,started_time_zone,started_device_id,editor_device_id,writer_epoch,local_revision,initial_plan_snapshot,last_workout_synced_at,created_at,updated_at,applied_plan_snapshot,last_snapshot_hash,last_snapshot_saved_at,ended_at,closed_at,completion_assessment_snapshot,deleted_at FROM workout_sessions WHERE id=?", UUID.randomUUID(), session)).isInstanceOf(DataIntegrityViolationException.class);
         assertThatThrownBy(() -> jdbc.update("UPDATE workout_sessions SET writer_epoch=-1 WHERE id=?", session)).isInstanceOf(DataIntegrityViolationException.class);
         assertThatThrownBy(() -> jdbc.update("UPDATE workout_sessions SET local_revision=-1 WHERE id=?", session)).isInstanceOf(DataIntegrityViolationException.class);
     }
@@ -926,6 +926,260 @@ class WorkoutSessionIntegrationTests {
         try{app.getBean(WorkoutSessionService.class).expireBatch();}finally{WorkoutReadFixtures.observer=null;}
         assertThat(row()).isEqualTo(before);app.getBean(WorkoutSessionService.class).expireBatch();assertThat(row().get("status")).isEqualTo("AUTO_CLOSED");assertThat(count("performed_sets")).isEqualTo(1);
     }
+
+    @ParameterizedTest @ValueSource(strings={"FINISHED","AUTO_CLOSED"})
+    void closedCorrectionsAndDeletesPreserveSealedFactsAndIncrementOnce(String status) throws Exception {
+        var base=initialState();var value=state(base,confirmed(base,new int[]{10,10,10},new Context("INITIAL_APPROVED",null)).performedSets(),List.of(completedCardio(base,UUID.randomUUID())),List.of(),List.of(),List.of());
+        close(status,value);long beforeVersion=(Long)row().get("version");var sealed=closureFacts();var contexts=node(browser.get(path())).get("snapshot").get("recordedContexts");
+        var first=value.performedSets().getFirst();var cardioId=value.cardioResults().getFirst().id();
+        var correction=new WorkoutRecordData.CardioCorrection(cardioId,65000,true,"2",120);
+        var ack=node(patchRecords(List.of(new WorkoutRecordData.SetCorrection(first.id(),"62.5",9)),List.of(correction),List.of(),List.of()));
+        assertThat(ack.get("version").asString()).isEqualTo(Long.toString(beforeVersion+1));assertThat(count("record_change_events")).isEqualTo(2);
+        assertThat(closureFacts()).isEqualTo(sealed);assertThat(node(browser.get(path())).get("snapshot").get("recordedContexts")).isEqualTo(contexts);
+        assertThat(jdbc.queryForObject("SELECT timer_ms FROM cardio_results WHERE id=?",Long.class,cardioId)).isEqualTo(60000L);
+        var again=node(patchRecords(List.of(new WorkoutRecordData.SetCorrection(first.id(),"62.5",9)),List.of(correction),List.of(),List.of()));
+        assertThat(again.get("changed").asBoolean()).isFalse();assertThat(again.get("version").asString()).isEqualTo(Long.toString(beforeVersion+1));
+        node(patchRecords(List.of(),List.of(),List.of(first.id()),List.of(cardioId)));
+        assertThat(row().get("version")).isEqualTo(beforeVersion+2);assertThat(closureFacts()).isEqualTo(sealed);assertThat(count("record_change_events")).isEqualTo(4);
+        assertThat(node(browser.get(path())).get("snapshot").get("state").get("performedSets").size()).isEqualTo(2);
+        var current=node(browser.get(path()+"/assessment")).get("currentAssessment");
+        if(status.equals("AUTO_CLOSED"))assertThat(current.get("reasonCodes").get(0).asString()).isEqualTo("AUTO_CLOSED");
+        else assertThat(current.get("evaluation").get("exercises").get(0).get("eligible").asBoolean()).isFalse();
+    }
+
+    @Test void currentAdviceUsesCorrectedWeightAndRepsWithoutOverwritingFirstAssessment() throws Exception {
+        var base=initialState();var value=confirmed(base,new int[]{10,10,10},new Context("INITIAL_APPROVED",null));node(finish(1,value));
+        var first=node(browser.get(path()+"/assessment")).get("completionAssessment");UUID key=value.performedSets().getFirst().id();
+        node(patchRecords(List.of(new WorkoutRecordData.SetCorrection(key,"60",5)),List.of(),List.of(),List.of()));
+        assertThat(currentExercise().get("advice").asString()).isEqualTo("DECREASE");
+        node(patchRecords(List.of(new WorkoutRecordData.SetCorrection(key,"61",5)),List.of(),List.of(),List.of()));
+        assertThat(currentExercise().get("advice").asString()).isEqualTo("UNAVAILABLE");
+        node(patchRecords(List.of(new WorkoutRecordData.SetCorrection(key,"60",8)),List.of(),List.of(),List.of()));
+        assertThat(currentExercise().get("advice").asString()).isEqualTo("MAINTAIN");
+        assertThat(node(browser.get(path()+"/assessment")).get("completionAssessment")).isEqualTo(first);
+        var retry=node(finish(1,value));assertThat(retry.get("version").asString()).isEqualTo("1");assertThat(retry.get("currentVersion").asString()).isEqualTo("4");
+    }
+
+    @Test void explicitRecoveryAddsMissingAndExtraSetsKeepsOrdinalAndIsSafelyRecognizedOnRequery() throws Exception {
+        var base=initialState();var original=confirmed(base,new int[]{8},new Context("INITIAL_APPROVED",null));node(finish(1,original));var sealed=closureFacts();
+        var missing=new ArrayList<SetValue>();for(int ordinal=2;ordinal<=4;ordinal++)missing.add(set(base,UUID.randomUUID(),ordinal,"60",8,new Context("INITIAL_APPROVED",null)));
+        var response=node(recover(missing,List.of()));assertThat(response.get("recoveredIds").size()).isEqualTo(3);assertThat(count("performed_sets")).isEqualTo(4);
+        assertThat(currentExercise().get("eligible").asBoolean()).isTrue();assertThat(currentExercise().get("evaluatedPerformedSetIds").size()).isEqualTo(3);
+        var duplicate=node(recover(missing,List.of()));assertThat(duplicate.get("changed").asBoolean()).isFalse();assertThat(duplicate.get("alreadyPresentIds").size()).isEqualTo(3);
+        assertThat(count("record_change_events")).isEqualTo(3);assertThat(row().get("version")).isEqualTo(2L);assertThat(closureFacts()).isEqualTo(sealed);
+        var history=node(browser.get(path()+"/record-change-events")).get("events");assertThat(history.get(0).get("before").isNull()).isTrue();
+        assertThat(history.get(0).get("changeContext").get("origin").get("writerEpoch").asString()).isEqualTo("0");
+    }
+
+    @Test void unknownApprovalClaimIsStoredUnverifiedAndNeverUpgradedByLaterRequests() throws Exception {
+        var base=initialState();node(finish(1,confirmed(base,new int[]{8,8},new Context("INITIAL_APPROVED",null))));
+        UUID unknown=UUID.randomUUID();var missing=set(base,UUID.randomUUID(),3,"60",8,new Context("APPROVAL_REQUEST",unknown));node(recover(List.of(missing),List.of()));
+        var detail=node(browser.get(path())).get("snapshot");var context=detail.get("recordedContexts");
+        assertThat(context.toString()).contains("UNVERIFIED");assertThat(currentExercise().get("eligible").asBoolean()).isFalse();
+        var history=node(browser.get(path()+"/record-change-events")).get("events").get(0).get("changeContext").get("claimedWeightContext");
+        assertThat(history.get("requestId").asString()).isEqualTo(unknown.toString());
+        assertThat(jdbc.queryForObject("SELECT approval_request_id FROM performed_sets WHERE id=?",UUID.class,missing.id())).isNull();
+        var repeated=node(recover(List.of(missing),List.of()));assertThat(repeated.get("changed").asBoolean()).isFalse();assertThat(count("record_change_events")).isEqualTo(1);
+    }
+
+    @Test void recoveryUsesStoredActiveApprovalInsteadOfCurrentRoutineWeight() throws Exception {
+        var base=initialState();var request=approval(base,1,null,0,"60","62.5");
+        node(finish(1,state(base,List.of(),List.of(),List.of(),List.of(),List.of(request))));
+        var update=updateRoutine();update.put("expectedVersion","1");update.put("weightApprovals",List.of(Map.of("placementId",placement,"nextApprovedWeightKg","70","occurredAt","2026-10-31T16:12:00Z")));node(browser.send("PUT",routinePath(),json(update),csrf));
+        var sets=new ArrayList<SetValue>();for(int ordinal=1;ordinal<=3;ordinal++)sets.add(set(base,UUID.randomUUID(),ordinal,"62.5",8,new Context("APPROVAL_REQUEST",request.id())));
+        node(recover(sets,List.of()));assertThat(currentExercise().get("eligible").asBoolean()).isTrue();
+        assertThat(currentExercise().get("comparisonContext").get("approvedWeightKg").asString()).isEqualTo("62.5");assertThat(eventCount()).isEqualTo(2);
+    }
+
+    @Test void autoClosedRecoveryAcceptsActualCompletionAfterServerClosureWithoutCreatingFinish() throws Exception {
+        var base=initialState();close("AUTO_CLOSED",base);var sealed=closureFacts();
+        var at=((java.sql.Timestamp)row().get("closed_at")).toInstant().plusSeconds(120);
+        var one=new SetValue(UUID.randomUUID(),base.appliedPlan().weightExercises().getFirst().sessionExerciseId(),1,"60",8,at,new Context("INITIAL_APPROVED",null));
+        var result=new Cardio(UUID.randomUUID(),base.appliedPlan().cardioActivities().getFirst().sessionActivityId(),"COMPLETED",at.minusSeconds(60),at,new CardioValue(60000L,60000L,false,null,null));
+        node(recover(List.of(one),List.of(result)));assertThat(closureFacts()).isEqualTo(sealed);
+        assertThat(row().get("ended_at")).isNull();assertThat(row().get("completion_assessment_snapshot")).isNull();assertThat(row().get("status")).isEqualTo("AUTO_CLOSED");
+        assertThat(node(browser.get(path()+"/assessment")).get("currentAssessment").get("advice").asString()).isEqualTo("UNAVAILABLE");
+    }
+
+    @ParameterizedTest @ValueSource(strings={"FINISHED","AUTO_CLOSED"})
+    void closedApprovalResolutionKeepsOriginalPerformanceContextAndReportsCurrentVersion(String status) throws Exception {
+        var base=initialState();node(editRoutine("PUT"));var request=approval(base,1,null,0,"60","65");
+        var value=state(base,List.of(set(base,UUID.randomUUID(),1,"65",8,new Context("APPROVAL_REQUEST",request.id()))),List.of(),List.of(),List.of(),List.of(request));
+        close(status,value);var frozen=closureFacts();long before=(Long)row().get("version");
+        var body=closedResolutionBody(base,List.of(request.id()),"KEEP_CURRENT",null);var original=new LinkedHashMap<>(body);
+        var resolved=node(browser.send("POST",path()+"/closed-approval-resolutions",json(body),csrf));
+        assertThat(resolved.get("version").asString()).isEqualTo(Long.toString(before+1));assertThat(resolved.get("approvalResults").get(0).get("status").asString()).isEqualTo("NOT_APPLIED");
+        assertThat(closureFacts()).isEqualTo(frozen);assertThat(eventCount()).isZero();
+        assertThat(jdbc.queryForObject("SELECT approval_state_at_recording FROM performed_sets WHERE session_id=?",String.class,session)).isEqualTo("PENDING");
+        error(browser.send("POST",path()+"/closed-approval-resolutions",json(original),csrf),409,"SESSION_VERSION_CONFLICT");
+        body.put("expectedVersion",row().get("version").toString());assertThat(node(browser.send("POST",path()+"/closed-approval-resolutions",json(body),csrf)).get("changed").asBoolean()).isFalse();
+        assertThat(node(browser.get(path())).get("snapshot").get("approvalResults").get(0).get("reason").asString()).isEqualTo("KEPT_CURRENT");
+        if(status.equals("FINISHED")) {
+            var retry=node(finish(1,value));assertThat(retry.get("duplicate").asBoolean()).isTrue();assertThat(retry.get("version").asString()).isEqualTo("1");
+            assertThat(retry.get("currentVersion").asString()).isEqualTo("2");assertThat(retry.get("approvalResults").get(0).get("status").asString()).isEqualTo("NOT_APPLIED");
+        }
+    }
+
+    @Test void postClosureReapprovalIsNewFactAndCannotAuthorizeRecoveredOldSessionSets() throws Exception {
+        var base=initialState();node(editRoutine("PUT"));var request=approval(base,1,null,0,"60","65");
+        close("AUTO_CLOSED",state(base,List.of(set(base,UUID.randomUUID(),1,"65",8,new Context("APPROVAL_REQUEST",request.id()))),List.of(),List.of(),List.of(),List.of(request)));
+        var sealed=closureFacts();UUID fresh=UUID.randomUUID();var body=closedResolutionBody(base,List.of(request.id()),"REAPPROVE",
+                Map.of("id",fresh,"sequence","2","expectedRoutineVersion","1","previousApprovedWeightKg","60","nextApprovedWeightKg","65"));
+        var occurred=EmailOtpFixtures.CLOCK.instant().plusSeconds(120);body.put("occurredAt",occurred.toString());
+        node(browser.send("POST",path()+"/closed-approval-resolutions",json(body),csrf));assertThat(eventCount()).isEqualTo(1);assertThat(routineVersion()).isEqualTo(2);
+        assertThat(jdbc.queryForObject("SELECT created_after_closure FROM session_weight_approval_requests WHERE id=?",Boolean.class,fresh)).isTrue();
+        var claim=new SetValue(UUID.randomUUID(),base.appliedPlan().weightExercises().getFirst().sessionExerciseId(),2,"65",8,occurred.plusSeconds(60),new Context("APPROVAL_REQUEST",fresh));
+        node(recover(List.of(claim),List.of()));
+        assertThat(jdbc.queryForObject("SELECT approval_state_at_recording FROM performed_sets WHERE id=?",String.class,claim.id())).isEqualTo("UNVERIFIED");
+        assertThat(jdbc.queryForObject("SELECT approval_state_at_recording FROM performed_sets WHERE ordinal=1 AND session_id=?",String.class,session)).isEqualTo("PENDING");
+        assertThat(closureFacts()).isEqualTo(sealed);assertThat(row().get("completion_assessment_snapshot")).isNull();
+    }
+
+    @Test void sessionLogicalDeletePreservesChildrenAndOriginalFinishConfirmationWithoutResurrection() throws Exception {
+        var base=initialState();var value=confirmed(base,new int[]{8,8,8},new Context("INITIAL_APPROVED",null));node(finish(1,value));var sealed=closureFacts();
+        var response=node(browser.send("DELETE",path(),json(recordScope()),csrf));assertThat(response.get("deletedAt").isNull()).isFalse();
+        assertThat(count("performed_sets")).isEqualTo(3);assertThat(jdbc.queryForObject("SELECT count(*) FROM performed_sets WHERE session_id=? AND deleted_at IS NOT NULL",Integer.class,session)).isZero();
+        assertThat(closureFacts()).isEqualTo(sealed);assertThat(node(browser.get(path())).get("deletedAt").isNull()).isFalse();
+        var retry=node(finish(1,value));assertThat(retry.get("duplicate").asBoolean()).isTrue();assertThat(retry.get("deletedAt").isNull()).isFalse();assertThat(row().get("version")).isEqualTo(2L);
+        error(patchRecords(List.of(new WorkoutRecordData.SetCorrection(value.performedSets().getFirst().id(),"60",9)),List.of(),List.of(),List.of()),409,"SESSION_DELETED");
+        error(recover(List.of(set(base,UUID.randomUUID(),4,"60",8,new Context("INITIAL_APPROVED",null))),List.of()),409,"SESSION_DELETED");
+        error(save(2,value),409,"SESSION_DELETED");error(browser.send("POST",path()+"/takeover",json(takeoverBody(UUID.randomUUID(),"0")),csrf),409,"SESSION_DELETED");
+        assertThat(node(browser.get(path()+"/assessment")).get("currentAssessment").get("reasonCodes").get(0).asString()).isEqualTo("SESSION_DELETED");
+        var event=node(browser.get(path()+"/record-change-events")).get("events").get(0);assertThat(event.get("recordKind").asString()).isEqualTo("SESSION");assertThat(event.get("changeKind").asString()).isEqualTo("DELETED");
+    }
+
+    @Test void editingOrDeletingPastCandidateRecalculatesCurrentBenchmarkOnly() throws Exception {
+        var base=initialState();var old=confirmed(base,new int[]{10,10,10},new Context("INITIAL_APPROVED",null));node(finish(1,old));UUID past=session;
+        session=UUID.randomUUID();base=initialStateAt("2026-10-31T17:00:00Z");var body=finishBody(1,confirmed(base,new int[]{8,8,8},new Context("INITIAL_APPROVED",null)));body.put("endedAt","2026-10-31T17:10:00Z");node(sendFinish(body));
+        UUID current=session;var frozen=row().get("completion_assessment_snapshot");assertThat(currentExercise().get("benchmarkEvidence").get("repsSum").asString()).isEqualTo("30");
+        session=past;node(patchRecords(List.of(new WorkoutRecordData.SetCorrection(old.performedSets().getFirst().id(),"60",5)),List.of(),List.of(),List.of()));
+        session=current;assertThat(currentExercise().get("benchmarkEvidence").get("repsSum").asString()).isEqualTo("25");assertThat(row().get("completion_assessment_snapshot")).isEqualTo(frozen);
+        session=past;node(browser.send("DELETE",path(),json(recordScope()),csrf));session=current;
+        assertThat(currentExercise().get("benchmarkEvidence").isNull()).isTrue();assertThat(row().get("completion_assessment_snapshot")).isEqualTo(frozen);
+    }
+
+    @ParameterizedTest @ValueSource(strings={"tombstone","different-body","ordinal","new-exercise","future-epoch","before-start","after-end","cardio-slot","cardio-clock"})
+    void recoveryRejectsConflictsWithoutPartialInsertionOrRewritingHistory(String conflict) throws Exception {
+        var base=initialState();var original=state(base,confirmed(base,new int[]{8},new Context("INITIAL_APPROVED",null)).performedSets(),List.of(completedCardio(base,UUID.randomUUID())),List.of(),List.of(),List.of());node(finish(1,original));
+        var first=original.performedSets().getFirst();var candidate=set(base,UUID.randomUUID(),2,"60",8,new Context("INITIAL_APPROVED",null));var sets=new ArrayList<>(List.of(set(base,UUID.randomUUID(),3,"60",8,new Context("INITIAL_APPROVED",null))));var cardio=new ArrayList<Cardio>();
+        int status=409;String code="RECORD_SLOT_CONFLICT";
+        switch(conflict) {
+            case "tombstone"->{node(patchRecords(List.of(),List.of(),List.of(first.id()),List.of()));candidate=first;status=422;code="RECORD_DELETED";}
+            case "different-body"->{candidate=new SetValue(first.id(),first.sessionExerciseId(),first.ordinal(),"65",9,first.completedAt(),first.weightContext());code="RECORD_ID_CONFLICT";}
+            case "ordinal"->candidate=set(base,UUID.randomUUID(),1,"60",8,new Context("INITIAL_APPROVED",null));
+            case "new-exercise"->{candidate=new SetValue(UUID.randomUUID(),UUID.randomUUID(),2,"60",8,first.completedAt(),first.weightContext());status=422;code="INVALID_SNAPSHOT";}
+            case "before-start"->{candidate=new SetValue(UUID.randomUUID(),first.sessionExerciseId(),2,"60",8,java.time.Instant.parse("2026-10-31T15:00:00Z"),first.weightContext());status=422;code="CLOCK_CONTEXT_INVALID";}
+            case "after-end"->{candidate=new SetValue(UUID.randomUUID(),first.sessionExerciseId(),2,"60",8,java.time.Instant.parse("2026-10-31T17:00:00Z"),first.weightContext());status=422;code="CLOCK_CONTEXT_INVALID";}
+            case "cardio-slot"->cardio.add(completedCardio(base,UUID.randomUUID()));
+            case "cardio-clock"->{var c=completedCardio(base,UUID.randomUUID());cardio.add(new Cardio(c.id(),c.sessionActivityId(),c.status(),c.startedAt(),c.occurredAt(),new CardioValue(60001L,60001L,false,null,null)));status=422;code="CLOCK_CONTEXT_INVALID";}
+            case "future-epoch"->{status=422;code="INVALID_RECOVERY_ORIGIN";}
+        }
+        sets.add(candidate);var body=recoveryBody(sets,cardio);if(conflict.equals("future-epoch"))body.put("origin",Map.of("editorDeviceId",device,"writerEpoch","1","localRevision","12"));
+        var before=row();int events=count("record_change_events"),performances=count("performed_sets");
+        error(browser.send("POST",path()+"/recoveries",json(body),csrf),status,code);
+        assertThat(row()).isEqualTo(before);assertThat(count("record_change_events")).isEqualTo(events);assertThat(count("performed_sets")).isEqualTo(performances);
+    }
+
+    @Test void twoAuthenticatedDevicesWithSameExpectedVersionOnlyCommitOneCorrection() throws Exception {
+        var base=initialState();var value=confirmed(base,new int[]{8,8,8},new Context("INITIAL_APPROVED",null));node(finish(1,value));
+        UUID key=value.performedSets().getFirst().id();var firstBody=recordEdit(List.of(new WorkoutRecordData.SetCorrection(key,"60",9)),List.of(),List.of(),List.of());
+        var secondBody=recordEdit(List.of(new WorkoutRecordData.SetCorrection(key,"60",10)),List.of(),List.of(),List.of());
+        EmailOtpFixtures.CLOCK.advance(Duration.ofSeconds(61));
+        try(var other=new Browser();var executor=Executors.newFixedThreadPool(2)) {
+            other.login(email);String otherCsrf=other.csrf();var locked=new CountDownLatch(1);var release=new CountDownLatch(1);var once=new AtomicBoolean();
+            WorkoutReadFixtures.observer=event->{if(!event.before()&&event.sql().startsWith("update workout_sessions")&&once.compareAndSet(false,true)){locked.countDown();await(release);}};
+            try {
+                var first=executor.submit(()->browser.send("PATCH",path()+"/records",json(firstBody),csrf));assertThat(locked.await(10,TimeUnit.SECONDS)).isTrue();
+                var second=executor.submit(()->other.send("PATCH",path()+"/records",json(secondBody),otherCsrf));
+                try{assertLockWait("workout_sessions");}finally{release.countDown();}
+                node(first.get(15,TimeUnit.SECONDS));error(second.get(15,TimeUnit.SECONDS),409,"SESSION_VERSION_CONFLICT");
+            }finally{release.countDown();WorkoutReadFixtures.observer=null;}
+        }
+        assertThat(row().get("version")).isEqualTo(2L);assertThat(count("record_change_events")).isEqualTo(1);
+    }
+
+    @Test void closedReapprovalSerializesWithRoutineEditingAndRollsBackLosingExternalVersion() throws Exception {
+        var base=initialState();node(editRoutine("PUT"));var request=approval(base,1,null,0,"60","65");node(finish(1,state(base,List.of(),List.of(),List.of(),List.of(),List.of(request))));
+        var resolution=closedResolutionBody(base,List.of(request.id()),"REAPPROVE",Map.of("id",UUID.randomUUID(),"sequence","2","expectedRoutineVersion","1","previousApprovedWeightKg","60","nextApprovedWeightKg","65"));resolution.put("occurredAt","2026-10-31T16:12:00Z");
+        var routineEdit=updateRoutine();routineEdit.put("expectedVersion","1");
+        var locked=new CountDownLatch(1);var release=new CountDownLatch(1);var once=new AtomicBoolean();
+        WorkoutReadFixtures.observer=event->{if(!event.before()&&event.sql().startsWith("update workout_sessions")&&once.compareAndSet(false,true)){locked.countDown();await(release);}};
+        try(var executor=Executors.newFixedThreadPool(2)) {
+            var resolving=executor.submit(()->browser.send("POST",path()+"/closed-approval-resolutions",json(resolution),csrf));assertThat(locked.await(10,TimeUnit.SECONDS)).isTrue();
+            var editing=executor.submit(()->browser.send("PUT",routinePath(),json(routineEdit),csrf));
+            try{assertLockWait("routines");}finally{release.countDown();}
+            node(resolving.get(15,TimeUnit.SECONDS));error(editing.get(15,TimeUnit.SECONDS),409,"ROUTINE_VERSION_CONFLICT");
+        }finally{release.countDown();WorkoutReadFixtures.observer=null;}
+        assertThat(row().get("version")).isEqualTo(2L);assertThat(routineVersion()).isEqualTo(2);assertThat(eventCount()).isEqualTo(1);
+    }
+
+    @ParameterizedTest @ValueSource(strings={"update performed_sets","insert into record_change_events","update workout_sessions","insert into performed_sets","delete-session","approval-event"})
+    void postClosureSqlFailureRollsBackFactsAuditApprovalsAndVersion(String failingSql) throws Exception {
+        var base=initialState();var value=confirmed(base,new int[]{8},new Context("INITIAL_APPROVED",null));Approval pending=null;
+        if(failingSql.equals("approval-event")){node(editRoutine("PUT"));pending=approval(base,1,null,0,"60","65");value=state(base,List.of(),List.of(),List.of(),List.of(),List.of(pending));}
+        node(finish(1,value));var before=row();var facts=jdbc.queryForList("SELECT * FROM performed_sets WHERE session_id=?",session);var approvals=jdbc.queryForList("SELECT * FROM session_weight_approval_requests WHERE session_id=?",session);
+        var once=new AtomicBoolean();String target=failingSql.equals("delete-session")?"update workout_sessions":failingSql.equals("approval-event")?"insert into progress_change_events":failingSql;
+        WorkoutReadFixtures.observer=event->{if(event.before()&&event.sql().startsWith(target)&&once.compareAndSet(false,true)){
+            try(var statement=event.connection().createStatement()){statement.execute("SELECT 1/0");}catch(java.sql.SQLException e){throw new org.springframework.dao.DataAccessResourceFailureException("isolated record edit failure",e);}
+        }};
+        try {
+            HttpResponse<String> response;
+            if(failingSql.equals("delete-session"))response=browser.send("DELETE",path(),json(recordScope()),csrf);
+            else if(failingSql.equals("insert into performed_sets"))response=recover(List.of(set(base,UUID.randomUUID(),2,"60",8,new Context("INITIAL_APPROVED",null))),List.of());
+            else if(failingSql.equals("approval-event")) {
+                var body=closedResolutionBody(base,List.of(pending.id()),"REAPPROVE",Map.of("id",UUID.randomUUID(),"sequence","2","expectedRoutineVersion","1","previousApprovedWeightKg","60","nextApprovedWeightKg","65"));body.put("occurredAt","2026-10-31T16:12:00Z");
+                response=browser.send("POST",path()+"/closed-approval-resolutions",json(body),csrf);
+            }else response=patchRecords(List.of(new WorkoutRecordData.SetCorrection(value.performedSets().getFirst().id(),"60",9)),List.of(),List.of(),List.of());
+            error(response,503,"WORKOUT_DATA_UNAVAILABLE");assertThat(once).isTrue();
+        }finally{WorkoutReadFixtures.observer=null;}
+        assertThat(row()).isEqualTo(before);assertThat(jdbc.queryForList("SELECT * FROM performed_sets WHERE session_id=?",session)).isEqualTo(facts);
+        assertThat(jdbc.queryForList("SELECT * FROM session_weight_approval_requests WHERE session_id=?",session)).isEqualTo(approvals);assertThat(count("record_change_events")).isZero();assertThat(eventCount()).isZero();
+    }
+
+    @ParameterizedTest @ValueSource(strings={"edit","recover","delete","resolve"})
+    void closedWritesRequireCsrfCurrentGenerationAndOwnerButNotOldWriterCredentials(String operation) throws Exception {
+        var base=initialState();node(editRoutine("PUT"));var pending=approval(base,1,null,0,"60","65");var value=state(base,List.of(set(base,UUID.randomUUID(),1,"60",8,new Context("INITIAL_APPROVED",null))),List.of(),List.of(),List.of(),List.of(pending));node(finish(1,value));
+        String method=operation.equals("edit")?"PATCH":operation.equals("delete")?"DELETE":"POST";
+        String suffix=switch(operation){case "edit"->"/records";case "recover"->"/recoveries";case "resolve"->"/closed-approval-resolutions";default->"";};
+        var body=switch(operation){case "edit"->recordEdit(List.of(new WorkoutRecordData.SetCorrection(value.performedSets().getFirst().id(),"60",9)),List.of(),List.of(),List.of());case "recover"->recoveryBody(List.of(set(base,UUID.randomUUID(),2,"60",8,new Context("INITIAL_APPROVED",null))),List.of());case "resolve"->closedResolutionBody(base,List.of(pending.id()),"KEEP_CURRENT",null);default->recordScope();};
+        var before=row();error(browser.send(method,path()+suffix,json(body),null),403,"CSRF_INVALID");
+        try(var anonymous=new Browser()){error(anonymous.send(method,path()+suffix,json(body),null),401,"AUTHENTICATION_REQUIRED");}
+        try(var foreign=new Browser()){foreign.login(UUID.randomUUID()+"@example.test");error(foreign.send(method,path()+suffix,json(body),foreign.csrf()),404,"SESSION_NOT_FOUND");error(foreign.get(path()+"/assessment"),404,"SESSION_NOT_FOUND");error(foreign.get(path()+"/record-change-events"),404,"SESSION_NOT_FOUND");}
+        body.put("dataGeneration","1");error(browser.send(method,path()+suffix,json(body),csrf),409,"DATA_GENERATION_MISMATCH");body.put("dataGeneration","0");
+        body.put("expectedVersion","0");error(browser.send(method,path()+suffix,json(body),csrf),409,"SESSION_VERSION_CONFLICT");
+        assertThat(row()).isEqualTo(before);assertThat(count("record_change_events")).isZero();
+    }
+
+    @Test void activeSessionCannotUseClosedEditsAndOldOriginRecoveryDoesNotRetagEpoch() throws Exception {
+        var base=initialState();var one=set(base,UUID.randomUUID(),1,"60",8,new Context("INITIAL_APPROVED",null));
+        error(recover(List.of(one),List.of()),409,"SESSION_NOT_CLOSED");error(browser.send("DELETE",path(),json(recordScope()),csrf),409,"SESSION_NOT_CLOSED");error(browser.get(path()+"/assessment"),409,"SESSION_NOT_CLOSED");
+        UUID next=UUID.randomUUID();node(browser.send("POST",path()+"/takeover",json(takeoverBody(next,"0")),csrf));
+        var finish=finishBody(1,base);finish.put("editorDeviceId",next);finish.put("writerEpoch","1");node(sendFinish(finish));var frozen=closureFacts();
+        node(recover(List.of(one),List.of()));assertThat(closureFacts()).isEqualTo(frozen);assertThat(row().get("writer_epoch")).isEqualTo(1L);
+        assertThat(node(browser.get(path()+"/record-change-events")).get("events").get(0).get("changeContext").get("origin").get("writerEpoch").asString()).isEqualTo("0");
+    }
+
+    Map<String,Object> closedResolutionBody(State base,List<UUID> pending,String decision,Object next) {
+        var body=resolutionBody(base,pending,decision,next);body.remove("editorDeviceId");body.remove("writerEpoch");body.remove("expectedLocalRevision");body.put("expectedVersion",body.remove("expectedSessionVersion"));return body;
+    }
+    Map<String,Object> recordScope() { return new LinkedHashMap<>(Map.of("dataGeneration","0","expectedVersion",row().get("version").toString())); }
+    Map<String,Object> recordEdit(List<WorkoutRecordData.SetCorrection> sets,List<WorkoutRecordData.CardioCorrection> cardio,List<UUID> deletedSets,List<UUID> deletedCardio) {
+        var body=recordScope();body.put("setCorrections",sets);body.put("cardioCorrections",cardio);body.put("deletedPerformedSetIds",deletedSets);body.put("deletedCardioResultIds",deletedCardio);return body;
+    }
+    HttpResponse<String> patchRecords(List<WorkoutRecordData.SetCorrection> sets,List<WorkoutRecordData.CardioCorrection> cardio,List<UUID> deletedSets,List<UUID> deletedCardio)throws Exception {
+        return browser.send("PATCH",path()+"/records",json(recordEdit(sets,cardio,deletedSets,deletedCardio)),csrf);
+    }
+    Map<String,Object> recoveryBody(List<SetValue> sets,List<Cardio> cardio) {
+        var body=recordScope();body.put("confirm",true);body.put("origin",Map.of("editorDeviceId",device,"writerEpoch","0","localRevision","12"));body.put("performedSets",sets);body.put("cardioResults",cardio);return body;
+    }
+    HttpResponse<String> recover(List<SetValue> sets,List<Cardio> cardio)throws Exception{return browser.send("POST",path()+"/recoveries",json(recoveryBody(sets,cardio)),csrf);}
+    void close(String status,State state)throws Exception {
+        if(status.equals("FINISHED"))node(finish(1,state));else {node(save(1,state));EmailOtpFixtures.CLOCK.advance(Duration.ofHours(24));node(browser.get(path()));}
+    }
+    Map<String,Object> closureFacts() {
+        var copy=new LinkedHashMap<>(row());copy.remove("version");copy.remove("updated_at");copy.remove("deleted_at");return copy;
+    }
+    JsonNode currentExercise()throws Exception{return node(browser.get(path()+"/assessment")).get("currentAssessment").get("evaluation").get("exercises").get(0);}
 
     State initialStateAt(String started) throws Exception {var body=startBody();body.put("startedAt",started);return JSON.treeToValue(node(start(body)).get("snapshot").get("state"),State.class);}
     State confirmed(State base,int[] reps,Context context) {

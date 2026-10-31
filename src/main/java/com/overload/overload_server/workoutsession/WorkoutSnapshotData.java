@@ -49,7 +49,7 @@ public final class WorkoutSnapshotData {
     }
     public record Finish(Save state, Instant endedAt) { }
     public record FinishAck(UUID userId,String dataGeneration,UUID sessionId,String status,String writerEpoch,
-            String acceptedLocalRevision,String version,Instant snapshotSavedAt,Instant lastWorkoutSyncedAt,
+            String acceptedLocalRevision,String version,String currentVersion,Instant deletedAt,Instant snapshotSavedAt,Instant lastWorkoutSyncedAt,
             Instant endedAt,Instant closedAt,boolean duplicate,List<ApprovalResult> approvalResults,
             WorkoutAssessment.Result completionAssessment) { }
 

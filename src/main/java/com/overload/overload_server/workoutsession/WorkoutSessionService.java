@@ -71,6 +71,7 @@ public class WorkoutSessionService {
         var result=transaction(writes, () -> {
             owner(owner, input.dataGeneration());
             var session = find(owner, input.dataGeneration(), id, true);
+            if(session.deletedAt!=null)throw new WorkoutSessionFailure(SESSION_DELETED);
             if (session.expireIfDue(clock.instant())) { sessions.flush(); return null; }
             if (session.status.equals("AUTO_CLOSED")) return null;
             session.takeover(input, clock.instant()); sessions.flush();

@@ -14,7 +14,36 @@ import java.net.URI;
 public class WorkoutSessionController {
     private final WorkoutSessionService service;
     private final WorkoutSnapshotService snapshots;
-    WorkoutSessionController(WorkoutSessionService service,WorkoutSnapshotService snapshots) { this.service = service; this.snapshots=snapshots; }
+    private final WorkoutRecordService records;
+    WorkoutSessionController(WorkoutSessionService service,WorkoutSnapshotService snapshots,WorkoutRecordService records) { this.service = service; this.snapshots=snapshots;this.records=records; }
+    @PatchMapping(value="/{id}/records",consumes="application/json")
+    ResponseEntity<WorkoutRecordData.Ack> edit(@AuthenticationPrincipal SessionPrincipal principal,@PathVariable String id,
+            @RequestBody String body,HttpServletRequest request) {
+        validate(request,false);return ok(records.edit(principal.userId(),WorkoutSessionRequests.uuid(id),WorkoutRecordRequests.edit(body)));
+    }
+    @PostMapping(value="/{id}/recoveries",consumes="application/json")
+    ResponseEntity<WorkoutRecordData.Ack> recover(@AuthenticationPrincipal SessionPrincipal principal,@PathVariable String id,
+            @RequestBody String body,HttpServletRequest request) {
+        validate(request,false);return ok(records.recover(principal.userId(),WorkoutSessionRequests.uuid(id),WorkoutRecordRequests.recover(body)));
+    }
+    @DeleteMapping(value="/{id}",consumes="application/json")
+    ResponseEntity<WorkoutRecordData.Ack> delete(@AuthenticationPrincipal SessionPrincipal principal,@PathVariable String id,
+            @RequestBody String body,HttpServletRequest request) {
+        validate(request,false);return ok(records.delete(principal.userId(),WorkoutSessionRequests.uuid(id),WorkoutRecordRequests.delete(body)));
+    }
+    @PostMapping(value="/{id}/closed-approval-resolutions",consumes="application/json")
+    ResponseEntity<WorkoutRecordData.ResolutionAck> resolveClosed(@AuthenticationPrincipal SessionPrincipal principal,@PathVariable String id,
+            @RequestBody String body,HttpServletRequest request) {
+        validate(request,false);return ok(snapshots.resolveClosed(principal.userId(),WorkoutSessionRequests.uuid(id),WorkoutRecordRequests.resolve(body)));
+    }
+    @GetMapping("/{id}/assessment")
+    ResponseEntity<WorkoutRecordData.Assessment> assessment(@AuthenticationPrincipal SessionPrincipal principal,@PathVariable String id,HttpServletRequest request) {
+        validate(request,true);return ok(records.assessment(principal.userId(),WorkoutSessionRequests.uuid(id)));
+    }
+    @GetMapping("/{id}/record-change-events")
+    ResponseEntity<WorkoutRecordData.Changes> changes(@AuthenticationPrincipal SessionPrincipal principal,@PathVariable String id,HttpServletRequest request) {
+        validate(request,true);return ok(records.changes(principal.userId(),WorkoutSessionRequests.uuid(id)));
+    }
     @PostMapping(value="/{id}/finish",consumes="application/json")
     ResponseEntity<WorkoutSnapshotData.FinishAck> finish(@AuthenticationPrincipal SessionPrincipal principal,
             @PathVariable String id,@RequestBody String body,HttpServletRequest request) {

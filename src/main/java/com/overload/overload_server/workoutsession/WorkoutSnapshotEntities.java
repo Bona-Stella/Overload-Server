@@ -48,6 +48,7 @@ class WeightApprovalRequest {
     @Column(name = "routine_version_after") Long versionAfter;
     @Column(name = "resolved_at") Instant resolvedAt;
     @Column(name = "resolved_by_request_id") UUID resolvedBy;
+    @Column(name = "created_after_closure", updatable = false) boolean createdAfterClosure;
     protected WeightApprovalRequest() {
     }
     WeightApprovalRequest(UUID session, WorkoutSnapshotData.Approval input) {
@@ -155,16 +156,21 @@ class RecordChangeEvent {
     @JdbcTypeCode(SqlTypes.JSON) @Column(name = "before_value", updatable = false, columnDefinition = "jsonb") String beforeValue;
     @JdbcTypeCode(SqlTypes.JSON) @Column(name = "after_value", updatable = false, columnDefinition = "jsonb") String afterValue;
     @Column(name = "recorded_at", updatable = false) Instant recordedAt;
+    @JdbcTypeCode(SqlTypes.JSON) @Column(name="change_context",updatable=false,columnDefinition="jsonb") String changeContext;
     protected RecordChangeEvent() {
     }
     RecordChangeEvent(UUID session, String kind, UUID record, Object before, Object after, Instant now) {
+        this(session,kind,record,after==null?"DELETED":"CORRECTED",before,after,null,now);
+    }
+    RecordChangeEvent(UUID session,String kind,UUID record,String change,Object before,Object after,Object context,Instant now) {
         id = UUID.randomUUID();
         sessionId = session;
         recordKind = kind;
         recordId = record;
-        changeKind = after==null?"DELETED":"CORRECTED";
-        beforeValue = WorkoutSnapshotData.json(before);
+        changeKind = change;
+        beforeValue = before==null?null:WorkoutSnapshotData.json(before);
         afterValue = after==null?null:WorkoutSnapshotData.json(after);
         recordedAt = now;
+        changeContext=context==null?null:WorkoutSnapshotData.json(context);
     }
 }
