@@ -1,13 +1,13 @@
-# 운동 세션 API — Task 009 1·2단계
+# 운동 세션 API — Task 009 1~3단계
 
-상태: START·ACTIVE/상세 조회·takeover 및 확정 snapshot·명시 승인 요청·온라인 승인 해결 구현. V12·V13은 격리 PostgreSQL에서만 검증하며 개인 로컬 `overload_dev`에는 적용하지 않는다.
+상태: START·조회·takeover·snapshot·승인 요청/해결, FINISH·최초 공식 평가 봉인·24시간 AUTO_CLOSED 구현. V12~V14는 격리 PostgreSQL에서만 검증하며 개인 로컬 `overload_dev`에는 적용하지 않는다.
 기준: [현행 설계와 후속 승인 보완](../tasks/task-009-redesign-v1.0.md), [루틴 계약](routine-management.md), 기존 인증·CSRF·Task 008 영속성 경계.
 
 ## 현재 제공 범위
 
 V12는 `workout_sessions`를 추가한다. InitialPlan은 `initial_plan_snapshot` JSONB 하나가 유일한 원본이다.
-V13은 현재 AppliedPlan과 수행·승인·정정 사실을 추가한다. finish·공식 평가·자동 종료·종료 후 정정·IndexedDB는 후속 단계다. 예정 세트 수만큼 행이나 객체를 생성하지 않는다.
-**이번 단계에는 만료 전이/예약 작업이 없으므로 24시간이 지나도 ACTIVE가 자동 해제되지 않는다.** 후속 자동 종료 구현 전의 서버 개발 단계이며 완료된 운동 기록 기능으로 제공하지 않는다.
+V13은 현재 AppliedPlan과 수행·승인·정정 사실을 추가한다. V14는 명시 종료 시각·서버 종료 시각·최초 평가만 추가한다. 예정 세트 수만큼 수행 행이나 객체를 생성하지 않는다.
+종료 후 정정·복구·Frontend/IndexedDB 연결은 후속 단계다. 종료된 세션의 ACTIVE 쓰기나 자동 재개는 제공하지 않는다.
 
 ## HTTP·인증
 
@@ -26,6 +26,7 @@ JSON 중복 키·추가 필드·필수 필드 누락·명시적으로 허용하�
 | POST | /api/v1/workout-sessions/{id}/takeover | 200, 새 epoch 또는 동일 인수 확인 |
 | PUT | /api/v1/workout-sessions/{id}/snapshot | 200, 전체 확정 상태 저장 또는 중복 ACK |
 | POST | /api/v1/workout-sessions/{id}/approval-resolutions | 200, 미해결 승인 명시 해결 또는 결과 재확인 |
+| POST | /api/v1/workout-sessions/{id}/finish | 200, 최종 snapshot·최초 평가·종료 또는 동일 종료 재확인 |
 
 START의 모든 필드:
 
@@ -55,8 +56,9 @@ takeover는 lastWorkoutSyncedAt을 갱신하지 않는다. 별도 heartbeat·주
 상세:
 
 ```text
-{userId,dataGeneration,id,status:"ACTIVE",version,startedAt,workoutDate,startedTimeZone,
- editorDeviceId,writerEpoch,localRevision,lastWorkoutSyncedAt,initialPlan,lastSnapshotSavedAt,snapshot}
+{userId,dataGeneration,id,status:"ACTIVE"|"FINISHED"|"AUTO_CLOSED",version,startedAt,workoutDate,startedTimeZone,
+ editorDeviceId,writerEpoch,localRevision,lastWorkoutSyncedAt,initialPlan,lastSnapshotSavedAt,snapshot,
+ endedAt:Instant|null,closedAt:Instant|null,completionAssessment:CompletionAssessment|null}
 initialPlan = {schemaVersion:1,routineId,routineName,routineVersion,
  weightExercises:[{sessionExerciseId,sourcePlacementId,exerciseDefinitionId,exerciseName,
    setCount,minReps,maxReps,initialWeightKg,approvedWeightKg}],
@@ -85,7 +87,7 @@ ACTIVE 부분 UNIQUE는 **user_id 단독**이다. 세대가 바뀌어도 한 계
 START는 workoutTransactionManager의 REPEATABLE_READ 쓰기 트랜잭션 하나에서 users FOR SHARE → routine FOR SHARE → 종목 UUID순 공유 잠금 → InitialPlan/세션 INSERT를 처리한다.
 루틴 PUT/DELETE의 기존 users→routine FOR UPDATE→종목 잠금과 경합하며, 복사 도중 계획이 섞이지 않는다. 직렬화 실패는409, 자동 재시도/병합 없음이다.
 같은 트랜잭션에서 JDBC owner 조회와 JPA 잠금·삽입을 처리한다. takeover는 users 공유 잠금→본인 세션 FOR UPDATE로 직렬화한다.
-상세/ACTIVE는 기존 Task 008과 같은 readOnly REPEATABLE_READ로 owner/generation 및 DTO를 일관되게 완성한다. 조회는 운동 DML·만료 연장·seed를 하지 않는다.
+세션 상세/ACTIVE는 짧은 별도 users 공유 잠금→session 배타 잠금 트랜잭션에서 자동 만료를 먼저 확정한 뒤, 기존 readOnly REPEATABLE_READ로 owner/generation 및 DTO를 일관되게 완성한다. 만료 전환 외 수행 변경·만료 연장·seed를 하지 않는다. Task 008 종목/설정 GET의 읽기 전용 경계는 변경하지 않는다.
 기존 primary JDBC 관리자·Spring Session REQUIRES_NEW·CSRF·인증 수명 정책은 유지한다.
 
 ## 오류
@@ -182,7 +184,7 @@ sequence가 뒤인 승인 시각이 선행 보존 요청보다 앞서면 CLOCK_C
 - 기존 세트 UUID·종목·ordinal·완료 시각·승인 참조/최초 승인 문맥은 불변이다. 중량·반복만 정정하며 before/after audit를 남긴다.
 - 유산소 UUID·활동·status·시작/완료 시각·timerMs는 불변이다. activeMs/정정 플래그/거리/BPM만 허용 범위 안에서 정정한다.
 - 승인 요청·처리 결과와 registry는 서버 보존 사실이다. 후속 입력에서 빠져도 삭제/재적용하지 않는다.
-- 원래 미완료 종목을 빼도 InitialPlan은 유지된다. 향후 평가가 현재 계획 축소를 원계획 완료로 해석해서는 안 된다. 현재 단계는 공식 평가를 실행하지 않는다.
+- 원래 미완료 종목을 빼도 InitialPlan은 유지된다. 현재 계획 축소를 원계획 완료로 해석하지 않으며, 최초 종료 평가에서도 원계획 완료 여부를 별도로 확인한다.
 
 ### revision·ACK
 
@@ -248,4 +250,95 @@ REAPPROVE는 `decision:"REAPPROVE"`, `newApprovalRequest:{id:새UUID,sequence:�
 CSRF·소유권·세대·편집 기기·epoch 검증은 중복 ACK와 해결 재확인에도 우회하지 않는다.
 
 추가400 INVALID_REQUEST,404 RECORD_NOT_FOUND/EXERCISE_NOT_FOUND,409 RECORD_ID_CONFLICT(다른 문맥이 점유한 수행/종목 UUID),422 INVALID_SNAPSHOT/IMMUTABLE_RECORD_CONTEXT/RECORD_DELETED와 위 도메인 오류를 사용한다. 기존503/500 저장소 오류 경계는 유지한다.
-finish·24시간 만료 수신 검사/작업·최초 종료 계획/평가 봉인·사후 종료 정정/복구는 아직 제공하지 않는다.
+종료 후 일반 정정/복구 API는 아직 제공하지 않는다.
+
+## FINISH — 최종 snapshot과 최초 종료 평가
+
+`POST /api/v1/workout-sessions/{id}/finish`, application/json. 요청의 정확한 필드는 기존 snapshot PUT의 `dataGeneration,editorDeviceId,writerEpoch,localRevision,snapshot`에 `endedAt:Instant` 하나를 추가한 것이다. snapshot 구조와 모든 필드·정규화·명시 삭제·허용 정정·승인 요청 규칙은 V13과 동일하다. userId·평가값·승인 처리 상태를 입력받지 않는다.
+
+```json
+{
+  "dataGeneration": "0",
+  "editorDeviceId": "11111111-1111-4111-8111-111111111111",
+  "writerEpoch": "0",
+  "localRevision": "1",
+  "endedAt": "2026-10-31T16:10:00Z",
+  "snapshot": {
+    "sessionExercises": [{"id":"22222222-2222-4222-8222-222222222222","kind":"WEIGHT","exerciseDefinitionId":"33333333-3333-4333-8333-333333333333"}],
+    "appliedPlan": {"schemaVersion":1,"weightExercises":[{"sessionExerciseId":"22222222-2222-4222-8222-222222222222","setCount":3,"minReps":6,"maxReps":10}],"cardioActivities":[]},
+    "performedSets": [],
+    "cardioResults": [],
+    "deletedPerformedSetIds": [],
+    "deletedCardioResultIds": [],
+    "approvalRequests": []
+  }
+}
+```
+
+위 예시는 수행이 없는 부분 명시 종료다. 실제 종료 시각은 시작 이후이면서 최종 유효 세트/유산소의 발생 시각 이후여야 한다. 같은 finish에서 새로 제출한 승인 시각도 endedAt 이후일 수 없다. 기존 승인 해결 같은 후속 관리 시각이나 서버 업로드 시각으로 실제 endedAt을 덮어쓰지 않는다. 모순은422 CLOCK_CONTEXT_INVALID다.
+
+하나의 workoutTransactionManager 트랜잭션에서 기존 snapshot 저장 로직을 재사용하여 최종 수행·승인 요청을 저장하고, 최초 평가·FINISHED·endedAt·closedAt을 원자 확정한다. 같은 트랜잭션의 세션 version은1회만 증가한다. 유효 수행 부족·PENDING·비교 대상 없음은 종료를 막지 않는다. 미완료 세트나 유산소를 자동 완료/SKIPPED 처리하지 않는다.
+
+응답의 정확한 필드:
+
+```text
+{userId,dataGeneration,sessionId,status:"FINISHED",writerEpoch,acceptedLocalRevision,version,
+ snapshotSavedAt,lastWorkoutSyncedAt,endedAt,closedAt,duplicate,approvalResults:[ApprovalResult],
+ completionAssessment:CompletionAssessment}
+CompletionAssessment = {schemaVersion:1,ruleVersion:"task009-completion-v1",assessedAt,sessionVersion,
+ overallWeightPlanComplete:Boolean|null,exercises:[ExerciseAssessment]}
+ExerciseAssessment = {sessionExerciseId,eligible,reasonCodes:[String],comparisonContext:ComparisonContext|null,
+ evaluatedPerformedSetIds:[UUID],evaluatedReps:[Count],repsSum:Counter,benchmarkEvidence:Benchmark|null,
+ advice:"INCREASE"|"DECREASE"|"MAINTAIN"|"UNAVAILABLE",adviceReason:String}
+ComparisonContext = {routineId,sourcePlacementId,exerciseDefinitionId,plannedSetCount,minReps,maxReps,approvedWeightKg,unit:"KG"}
+Benchmark = {sessionId,sessionVersion,endedAt,performedSetIds:[UUID],reps:[Count],repsSum:Counter,ruleVersion}
+```
+
+Counter는 기존과 같은 정규 문자열이다. 유산소만 있는 세션은 overallWeightPlanComplete=null, exercises=[]이며 가짜 웨이트 평가를 만들지 않는다.
+APPLIED_PLAN은 별도 사본 없이 기존 applied_plan_snapshot을 종료와 동시에 동결한다. JSONB 최초 평가의 선택 UUID·반복 배열·합계는 불변 판단 근거이며 편집 가능한 수행 원본이 아니다. 관계형 실제 수행을 평가 JSON으로 수정하지 않는다.
+최초 평가의 sessionVersion 및 finish 응답 version은 최초 종료 version이다. 향후 허용 정정으로 현재 상세 version이 달라지더라도 최초 종료 결과를 바꾸지 않는다.
+START·snapshot·종료의 서버 저장 메타 시각은 PostgreSQL과 동일한 microsecond 정밀도로 기록하여 최초 응답과 재조회/중복 ACK를 일치시킨다. 클라이언트 실제 발생 시각은 기존 millisecond 입력 그대로 보존하며 서버 시각으로 보정하지 않는다. 만료 여부는 정밀도를 줄이기 전 서버 Clock으로 판정한다.
+
+### 종료 중복·revision
+
+- 높은 revision은 V13과 같이 검증·저장한다. 현재 revision과 동일하고 canonical snapshot hash가 같아도 최초 finish로 종료할 수 있다. 낮은 revision이나 같은 revision의 다른 snapshot은 기존409를 유지한다.
+- FINISHED의 동일 `owner/generation/device/epoch/revision/canonical snapshot hash/endedAt`은200 duplicate=true다. 최초 평가·승인·수행·version·시각을 다시 저장하지 않는다.
+- 종료 식별에는 기존 snapshot hash·epoch·revision과 endedAt을 사용한다. 별도 finish 요청 ID·영구 영수증·추가 fingerprint 컬럼은 없다.
+- 다른 내용·종료 시각·revision의 finish는409 FINISH_REQUEST_MISMATCH, 구 기기/epoch는409 EDITOR_OWNERSHIP_LOST다. 동일 종료 재확인은 24시간 이후에도 최초 결과를 반환한다.
+- FINISHED 이후 일반 snapshot·takeover·승인 해결은409 SESSION_NOT_ACTIVE다. 보존 승인 결과는 상세 조회로 확인한다. 종료 후 승인 해결/수행 복구는 이번 범위가 아니다.
+- AUTO_CLOSED에는 성공한 명시 finish가 없으므로409 SESSION_AUTO_CLOSED이며 허위 finish ACK를 만들지 않는다.
+
+## 최초 공식 평가 — 확정 규칙
+
+사용자가 2026-10-31 구현 중 A·B를 확정했다. 목표 반복 범위 밖의 양수 수행도 정상 문맥이면 후보로 허용한다(A). 승인 전 수행을 명시 삭제했더라도 이력과 당시 승인 문맥을 보존하면서 현재 유효 첫 N개로 판단하고, 그 삭제 이력만으로 영구 제외하지 않는다(B).
+
+InitialPlan 대상 종목의 삭제되지 않은 완료 수행을 ordinal ASC→UUID ASC로 정렬해 처음 N개를 선택한다. 승인 검사는 선택 후에 한다. 임시/PENDING 수행을 건너뛰어 뒤의 정상 수행으로 바꾸지 않는다. N개 이후 수행은 모두 저장하지만 그 자체로 자격을 박탈하지 않는다.
+전체 원계획 웨이트 완료 여부, 최종 목표 세트 수·반복 범위 일치, 수행 당시의 정상 승인 문맥과 실제 중량 일치를 검사한다. 중간 구조 변경 flag·루틴 이름·표시 정렬로 판단하지 않는다. 현재 루틴 승인값이나 나중의 재승인으로 최초 수행 문맥을 바꾸지 않는다.
+
+제외 사유는 INCOMPLETE_INITIAL_WEIGHT_PLAN, INITIAL_EXERCISE_REMOVED, SET_COUNT_MISMATCH, COMPARISON_CONTEXT_MISMATCH, INSUFFICIENT_PERFORMED_SETS, TEMPORARY_WEIGHT, NO_APPROVED_CONTEXT, MIXED_WEIGHT다. 유산소 skip/미입력 자체를 웨이트 제외 사유로 사용하지 않는다.
+
+과거 후보는 본인 현재 세대의 FINISHED 중 `candidate.endedAt <= current.startedAt`이고 비교 문맥이 같은 단일 세션이다. AUTO_CLOSED·현재 세션은 제외한다. 첫 N개 합계 DESC→실제 endedAt DESC→UUID ASC로 선택하며 여러 세션의 반복을 합성하지 않는다. 별도 benchmark 캐시 테이블은 없다.
+
+이번 수행 권고는 후보 순위와 독립이다. 자격 미충족은 UNAVAILABLE/INELIGIBLE, 첫 N개 중 하나라도 하한 미달은 DECREASE/BELOW_MIN_REPS, 전부 상한 이상은 INCREASE/ALL_AT_OR_ABOVE_MAX_REPS, 나머지는 MAINTAIN/TARGET_NOT_EXCEEDED_BY_ALL_SETS다. 비교 대상이 없더라도 정상 수행 자체의 권고는 계산한다. 중량 변경 폭·1RM·최근 약한 수행과 최고 기준을 합친 새 공식은 만들지 않는다. 승인 중량/사건을 자동 변경하지 않는다.
+이 산식은 2026-10-31 사용자가 확정한 초기 안내 정책이다. 결과는 사용자의 판단을 돕는 권고이며 승인 중량 변경은 별도의 명시적 승인을 통해서만 처리한다.
+
+## 24시간 AUTO_CLOSED와 만료 경합
+
+`now >= lastWorkoutSyncedAt + Duration.ofHours(24)`를 세션 잠금 후 새로 읽은 서버 Clock으로 판정한다. 먼저 만료를 검사한 뒤 입력을 적용하므로 늦은 snapshot이 기한을 갱신하며 살아나지 않는다. GET·takeover·중복·높은 무변경 revision·승인 해결은 기한을 연장하지 않는다.
+
+V14 추가 컬럼은 ended_at(사용자 실제 종료), closed_at(서버 종료 기록), completion_assessment_snapshot 세 개다. 상태별 제약:
+
+| 상태 | ended_at | closed_at | completionAssessment |
+|---|---|---|---|
+| ACTIVE | null | null | null |
+| FINISHED | 필수 | 필수 | 필수 |
+| AUTO_CLOSED | null | 필수 | null |
+
+AUTO_CLOSED는 현재 저장된 수행·유산소·PENDING·계획을 그대로 보존한다. 미전송 초안을 만들거나 운동 시간을 24시간으로 채우지 않는다. 종료 후 AppliedPlan·최초 평가·종료 시각·editor/epoch/revision/hash/동기화 메타는 DB trigger로 동결한다. InitialPlan trigger와 사용자 단독 ACTIVE UNIQUE도 유지한다.
+
+snapshot/finish/takeover/승인 해결에서 만료 전환은 트랜잭션 결과로 반환해 **먼저 커밋한 뒤**409 SESSION_AUTO_CLOSED로 변환한다. 정상 만료에서 트랜잭션 내부 예외를 던져 종료를 롤백하지 않는다. 실제 DB 오류는 전체 롤백한다.
+새 START는 기존 만료 ACTIVE를 닫고 flush하여 슬롯을 해제한 뒤 새 세션/registry를 같은 트랜잭션에 생성한다. 실패하면 함께 롤백한다. 동일 START 재조회는 기존 종료 상태를 반환하며 새 ACTIVE를 만들지 않는다.
+
+예약 작업은 기존 Spring @Scheduled로 시작 시 실행하고 기본 fixed delay60초다. `overload.workout.expiry.enabled=false`로 비활성화할 수 있고 `overload.workout.expiry.delay-ms`로 간격을 지정한다. 만료 기준24시간은 설정으로 바꾸지 않는다.
+후보는 잠그지 않고 최대1000개 조회하며 후보별 독립 트랜잭션에서 users FOR SHARE→session FOR UPDATE SKIP LOCKED 순으로 잠그고 재검사한다. 처리 실패는 경고를 기록하고 롤백하며 다음 실행에서 재시도한다. 기동 시 DB에서 만료 후보를 다시 읽으므로 별도 작업 영수증/메모리 만료 상태/분산 잠금은 없다.
+요청과 작업이 경합하면 세션 잠금 아래 최신 상태·기한을 재확인한다. 기한 전에 잠금을 얻어 유효성을 확인한 저장/종료와 만료 후 전이를 구분한다. AUTO_CLOSED 이후의 오래된 업로드는 결과를 덮어쓰거나 재개하지 못한다.

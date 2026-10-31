@@ -47,6 +47,11 @@ public final class WorkoutSnapshotData {
 
     public record Save(long dataGeneration, UUID editorDeviceId, long writerEpoch, long localRevision, State snapshot) {
     }
+    public record Finish(Save state, Instant endedAt) { }
+    public record FinishAck(UUID userId,String dataGeneration,UUID sessionId,String status,String writerEpoch,
+            String acceptedLocalRevision,String version,Instant snapshotSavedAt,Instant lastWorkoutSyncedAt,
+            Instant endedAt,Instant closedAt,boolean duplicate,List<ApprovalResult> approvalResults,
+            WorkoutAssessment.Result completionAssessment) { }
 
     public record Resolve(long dataGeneration, UUID editorDeviceId, long writerEpoch, long expectedSessionVersion,
         long expectedLocalRevision, UUID sessionExerciseId, List<UUID> pendingRequestIds,

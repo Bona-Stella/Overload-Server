@@ -157,7 +157,7 @@ class WorkoutSessionIntegrationTests {
         assertThatThrownBy(() -> jdbc.update("UPDATE workout_sessions SET initial_plan_snapshot=initial_plan_snapshot || '{\"routineName\":\"tampered\"}'::jsonb WHERE id=?", session)).isInstanceOf(DataIntegrityViolationException.class);
         assertThatThrownBy(() -> jdbc.update("UPDATE workout_sessions SET started_at=started_at+interval '1 second' WHERE id=?", session)).isInstanceOf(DataIntegrityViolationException.class);
         assertThatThrownBy(() -> jdbc.update("UPDATE users SET data_generation=1 WHERE id=?", owner.id())).isInstanceOf(DataIntegrityViolationException.class);
-        assertThatThrownBy(() -> jdbc.update("INSERT INTO workout_sessions SELECT ?,user_id,data_generation,source_routine_id,status,version,started_at,workout_date,started_time_zone,started_device_id,editor_device_id,writer_epoch,local_revision,initial_plan_snapshot,last_workout_synced_at,created_at,updated_at,applied_plan_snapshot,last_snapshot_hash,last_snapshot_saved_at FROM workout_sessions WHERE id=?", UUID.randomUUID(), session)).isInstanceOf(DataIntegrityViolationException.class);
+        assertThatThrownBy(() -> jdbc.update("INSERT INTO workout_sessions SELECT ?,user_id,data_generation,source_routine_id,status,version,started_at,workout_date,started_time_zone,started_device_id,editor_device_id,writer_epoch,local_revision,initial_plan_snapshot,last_workout_synced_at,created_at,updated_at,applied_plan_snapshot,last_snapshot_hash,last_snapshot_saved_at,ended_at,closed_at,completion_assessment_snapshot FROM workout_sessions WHERE id=?", UUID.randomUUID(), session)).isInstanceOf(DataIntegrityViolationException.class);
         assertThatThrownBy(() -> jdbc.update("UPDATE workout_sessions SET writer_epoch=-1 WHERE id=?", session)).isInstanceOf(DataIntegrityViolationException.class);
         assertThatThrownBy(() -> jdbc.update("UPDATE workout_sessions SET local_revision=-1 WHERE id=?", session)).isInstanceOf(DataIntegrityViolationException.class);
     }
@@ -657,6 +657,285 @@ class WorkoutSessionIntegrationTests {
         error(save(2,state(base,List.of(),List.of(),List.of(),List.of(),List.of(next))),422,"CLOCK_CONTEXT_INVALID");
         assertThat(eventCount()).isEqualTo(1);
     }
+
+    @Test void finishCommitsFinalStateAndFirstAssessmentOnceAndSealsBothPlans() throws Exception {
+        var base=initialState();var initial=node(browser.get(path())).get("initialPlan");
+        var value=confirmed(base,new int[]{10,10,10,1},new Context("INITIAL_APPROVED",null));
+        var result=node(finish(1,value));assertThat(result.get("status").asString()).isEqualTo("FINISHED");
+        assertThat(result.get("version").asString()).isEqualTo("1");assertThat(result.get("duplicate").asBoolean()).isFalse();
+        var assessment=result.get("completionAssessment");var evaluated=assessment.get("exercises").get(0);
+        assertThat(evaluated.get("eligible").asBoolean()).isTrue();assertThat(evaluated.get("advice").asString()).isEqualTo("INCREASE");
+        assertThat(evaluated.get("evaluatedPerformedSetIds").size()).isEqualTo(3);assertThat(count("performed_sets")).isEqualTo(4);
+        var original=row();EmailOtpFixtures.CLOCK.advance(Duration.ofHours(25));
+        assertThat(node(finish(1,value)).get("duplicate").asBoolean()).isTrue();assertThat(row()).isEqualTo(original);
+        assertThat(node(browser.get(path())).get("initialPlan")).isEqualTo(initial);
+        assertThat(node(browser.get(BASE+"/active")).get("session").isNull()).isTrue();
+        var changed=finishBody(1,value);changed.put("endedAt","2026-10-31T16:11:00Z");error(sendFinish(changed),409,"FINISH_REQUEST_MISMATCH");
+        error(finish(2,value),409,"FINISH_REQUEST_MISMATCH");error(save(2,value),409,"SESSION_NOT_ACTIVE");
+        error(browser.send("POST",path()+"/takeover",json(takeoverBody(UUID.randomUUID(),"0")),csrf),409,"SESSION_NOT_ACTIVE");
+        for(String assignment:List.of("applied_plan_snapshot='{}'::jsonb","completion_assessment_snapshot='{}'::jsonb","status='ACTIVE'","ended_at=ended_at+interval '1 second'"))
+            assertThatThrownBy(()->jdbc.update("UPDATE workout_sessions SET "+assignment+" WHERE id=?",session)).isInstanceOf(DataIntegrityViolationException.class);
+        assertThat(row()).isEqualTo(original);
+        // A future correction's root version must not change the original finish ACK.
+        jdbc.update("UPDATE workout_sessions SET version=version+1 WHERE id=?",session);
+        assertThat(node(finish(1,value)).get("version").asString()).isEqualTo("1");
+        assertThat(node(browser.get(path())).get("completionAssessment")).isEqualTo(assessment);
+    }
+
+    @Test void finishRetryPreservesServerTimestampsAcrossPostgresPrecisionRoundTrip() throws Exception {
+        EmailOtpFixtures.CLOCK.advance(Duration.ofNanos(123456789));
+        var started=node(start(startBody()));
+        assertThat(node(browser.get(path())).get("lastWorkoutSyncedAt")).isEqualTo(started.get("lastWorkoutSyncedAt"));
+        var base=JSON.treeToValue(started.get("snapshot").get("state"),State.class);
+        var value=confirmed(base,new int[]{8,8,8},new Context("INITIAL_APPROVED",null));
+        EmailOtpFixtures.CLOCK.advance(Duration.ofNanos(123456789));
+        var first=node(finish(1,value));var retry=node(finish(1,value));
+        for(String field:List.of("closedAt","snapshotSavedAt","lastWorkoutSyncedAt","endedAt","completionAssessment"))
+            assertThat(retry.get(field)).as(field).isEqualTo(first.get(field));
+        assertThat(retry.get("duplicate").asBoolean()).isTrue();
+    }
+
+    @Test void finishOfAlreadySyncedStateDoesNotDoubleIncrementOrExtendNoOpSync() throws Exception {
+        var base=initialState();var value=confirmed(base,new int[]{8,8,8},new Context("INITIAL_APPROVED",null));node(save(1,value));
+        var saved=row();EmailOtpFixtures.CLOCK.advance(Duration.ofMinutes(2));
+        var ack=node(finish(1,value));assertThat(ack.get("version").asString()).isEqualTo("2");
+        assertThat(row().get("last_workout_synced_at")).isEqualTo(saved.get("last_workout_synced_at"));
+        assertThat(row().get("last_snapshot_saved_at")).isEqualTo(saved.get("last_snapshot_saved_at"));
+        assertThat(count("performed_sets")).isEqualTo(3);
+    }
+
+    @Test void finishKeepsPendingApprovalAndPartialCardioWithoutCreatingMissingPerformances() throws Exception {
+        var base=initialState();assertThat(editRoutine("PUT").statusCode()).isEqualTo(200);
+        var request=approval(base,1,null,0,"60","65");
+        var one=set(base,UUID.randomUUID(),1,"65",8,new Context("APPROVAL_REQUEST",request.id()));
+        var value=state(base,List.of(one),List.of(),List.of(),List.of(),List.of(request));
+        var ack=node(finish(1,value));assertThat(ack.get("approvalResults").get(0).get("status").asString()).isEqualTo("PENDING");
+        assertThat(count("performed_sets")).isEqualTo(1);assertThat(count("cardio_results")).isZero();assertThat(eventCount()).isZero();
+        assertThat(ack.get("completionAssessment").get("overallWeightPlanComplete").asBoolean()).isFalse();
+        assertThat(ack.get("completionAssessment").get("exercises").get(0).get("advice").asString()).isEqualTo("UNAVAILABLE");
+        assertThat(node(browser.get(path())).get("snapshot").get("recordedContexts").get(0).get("approvalStateAtRecording").asString()).isEqualTo("PENDING");
+    }
+
+    @Test void finishApprovesSequentialRequestsAtomicallyAndPreservesEachPerformedContext() throws Exception {
+        var base=initialState();var a=approval(base,1,null,0,"60","62.5");var b=approval(base,2,a.id(),0,"62.5","65");
+        var value=confirmed(base,new int[]{8,8,8},new Context("APPROVAL_REQUEST",b.id()));
+        var sets=value.performedSets().stream().map(s->new SetValue(s.id(),s.sessionExerciseId(),s.ordinal(),"65",s.reps(),s.completedAt(),s.weightContext())).toList();
+        value=state(base,sets,List.of(),List.of(),List.of(),List.of(a,b));
+        var result=node(finish(1,value));assertThat(eventCount()).isEqualTo(2);assertThat(routineVersion()).isEqualTo(1);
+        assertThat(result.get("completionAssessment").get("exercises").get(0).get("comparisonContext").get("approvedWeightKg").asString()).isEqualTo("65");
+        var old=row().get("completion_assessment_snapshot");
+        var update=updateRoutine();update.put("expectedVersion","1");update.put("weightApprovals",List.of(Map.of("placementId",placement,"nextApprovedWeightKg","70","occurredAt","2026-10-31T16:12:00Z")));
+        node(browser.send("PUT",routinePath(),json(update),csrf));
+        assertThat(row().get("completion_assessment_snapshot")).isEqualTo(old);node(finish(1,value));assertThat(eventCount()).isEqualTo(3);
+    }
+
+    @Test void deletedPreApprovalPerformanceDoesNotEraseHistoryOrPermanentlyDisqualifyNewApprovedSets() throws Exception {
+        var base=initialState();var old=set(base,UUID.randomUUID(),1,"60",8,new Context("INITIAL_APPROVED",null));
+        node(save(1,state(base,List.of(old),List.of(),List.of(),List.of(),List.of())));
+        var request=new Approval(UUID.randomUUID(),old.sessionExerciseId(),1,null,0,"60","62.5",java.time.Instant.parse("2026-10-31T16:03:00Z"));
+        var sets=new ArrayList<SetValue>();for(int i=1;i<=3;i++)sets.add(new SetValue(UUID.randomUUID(),old.sessionExerciseId(),i,"62.5",8,
+                java.time.Instant.parse("2026-10-31T16:04:00Z").plusSeconds(i),new Context("APPROVAL_REQUEST",request.id())));
+        var result=node(finish(2,state(base,sets,List.of(),List.of(old.id()),List.of(),List.of(request))));
+        var exerciseAssessment=result.get("completionAssessment").get("exercises").get(0);
+        assertThat(exerciseAssessment.get("eligible").asBoolean()).isTrue();
+        assertThat(exerciseAssessment.get("comparisonContext").get("approvedWeightKg").asString()).isEqualTo("62.5");
+        var original=jdbc.queryForMap("SELECT weight,approved_weight_at_recording,approval_state_at_recording,deleted_at FROM performed_sets WHERE id=?",old.id());
+        assertThat((java.math.BigDecimal)original.get("weight")).isEqualByComparingTo("60");
+        assertThat((java.math.BigDecimal)original.get("approved_weight_at_recording")).isEqualByComparingTo("60");
+        assertThat(original.get("approval_state_at_recording")).isEqualTo("INITIAL_APPROVED");assertThat(original.get("deleted_at")).isNotNull();
+        assertThat(count("performed_sets")).isEqualTo(4);assertThat(count("record_change_events")).isEqualTo(1);assertThat(eventCount()).isEqualTo(1);
+    }
+
+    @Test void historicalBenchmarkUsesWholeSessionSumThenActualEndedTimeAndUuid() throws Exception {
+        var first=initialState();UUID firstId=session;node(finish(1,confirmed(first,new int[]{10,10,10},new Context("INITIAL_APPROVED",null))));
+        session=UUID.randomUUID();var second=initialStateAt("2026-10-31T17:00:00Z");
+        var body=finishBody(1,confirmed(second,new int[]{15,8,8},new Context("INITIAL_APPROVED",null)));body.put("endedAt","2026-10-31T17:10:00Z");node(sendFinish(body));UUID best=session;
+        session=UUID.randomUUID();var current=initialStateAt("2026-10-31T18:00:00Z");
+        body=finishBody(1,confirmed(current,new int[]{8,8,8},new Context("INITIAL_APPROVED",null)));body.put("endedAt","2026-10-31T18:10:00Z");
+        var result=node(sendFinish(body)).get("completionAssessment").get("exercises").get(0);
+        assertThat(result.get("benchmarkEvidence").get("sessionId").asString()).isEqualTo(best.toString()).isNotEqualTo(firstId.toString());
+        assertThat(result.get("benchmarkEvidence").get("reps")).isEqualTo(JSON.valueToTree(List.of(15,8,8)));
+        assertThat(result.get("advice").asString()).isEqualTo("MAINTAIN");
+    }
+
+    @Test void historicalCutoffExcludesFutureEndedSessionAndAutoClosedRecord() throws Exception {
+        var base=initialState();node(finish(1,confirmed(base,new int[]{10,10,10},new Context("INITIAL_APPROVED",null))));
+        session=UUID.randomUUID();base=initialStateAt("2026-10-31T16:05:00Z");
+        var body=finishBody(1,confirmed(base,new int[]{8,8,8},new Context("INITIAL_APPROVED",null)));body.put("endedAt","2026-10-31T16:08:00Z");
+        assertThat(node(sendFinish(body)).get("completionAssessment").get("exercises").get(0).get("benchmarkEvidence").isNull()).isTrue();
+        session=UUID.randomUUID();base=initialStateAt("2026-10-31T17:00:00Z");node(save(1,confirmed(base,new int[]{100,100,100},new Context("INITIAL_APPROVED",null))));
+        EmailOtpFixtures.CLOCK.advance(Duration.ofHours(24));node(browser.get(path()));assertThat(row().get("status")).isEqualTo("AUTO_CLOSED");
+        session=UUID.randomUUID();base=initialStateAt("2026-10-31T18:00:00Z");body=finishBody(1,confirmed(base,new int[]{8,8,8},new Context("INITIAL_APPROVED",null)));body.put("endedAt","2026-10-31T18:10:00Z");
+        var evidence=node(sendFinish(body)).get("completionAssessment").get("exercises").get(0).get("benchmarkEvidence");
+        assertThat(evidence.get("repsSum").asString()).isEqualTo("30");
+    }
+
+    @Test void historicalTieResolvesByRecentEndThenCanonicalUuidAscending() throws Exception {
+        var ids=new ArrayList<UUID>();
+        for(int i=0;i<2;i++) {
+            var base=initialState();ids.add(session);node(finish(1,confirmed(base,new int[]{8,8,8},new Context("INITIAL_APPROVED",null))));session=UUID.randomUUID();
+        }
+        var base=initialStateAt("2026-10-31T17:00:00Z");var body=finishBody(1,confirmed(base,new int[]{8,8,8},new Context("INITIAL_APPROVED",null)));body.put("endedAt","2026-10-31T17:10:00Z");
+        var evidence=node(sendFinish(body)).get("completionAssessment").get("exercises").get(0).get("benchmarkEvidence");
+        assertThat(evidence.get("sessionId").asString()).isEqualTo(ids.stream().map(UUID::toString).sorted().findFirst().orElseThrow());
+        UUID recent=session;session=UUID.randomUUID();base=initialStateAt("2026-10-31T18:00:00Z");body=finishBody(1,confirmed(base,new int[]{8,8,8},new Context("INITIAL_APPROVED",null)));body.put("endedAt","2026-10-31T18:10:00Z");
+        assertThat(node(sendFinish(body)).get("completionAssessment").get("exercises").get(0).get("benchmarkEvidence").get("sessionId").asString()).isEqualTo(recent.toString());
+    }
+
+    @ParameterizedTest @ValueSource(strings={"snapshot","finish","takeover","resolution"})
+    void exactDeadlineClosesBeforeLateRequestAndCommitsDespiteHttpConflict(String action) throws Exception {
+        var base=initialState();assertThat(editRoutine("PUT").statusCode()).isEqualTo(200);var request=approval(base,1,null,0,"60","65");
+        var value=state(base,List.of(set(base,UUID.randomUUID(),1,"65",8,new Context("APPROVAL_REQUEST",request.id()))),List.of(completedCardio(base,UUID.randomUUID())),List.of(),List.of(),List.of(request));
+        node(save(1,value));var stored=row();var sets=jdbc.queryForList("SELECT * FROM performed_sets WHERE session_id=?",session);
+        var resolution=resolutionBody(base,List.of(request.id()),"KEEP_CURRENT",null);
+        EmailOtpFixtures.CLOCK.advance(Duration.ofHours(24));
+        var response=switch(action) {
+            case "snapshot"->save(1,value);case "finish"->finish(2,value);
+            case "takeover"->browser.send("POST",path()+"/takeover",json(takeoverBody(UUID.randomUUID(),"0")),csrf);
+            default->resolve(resolution);
+        };
+        error(response,409,"SESSION_AUTO_CLOSED");assertThat(row().get("status")).isEqualTo("AUTO_CLOSED");
+        assertThat(row().get("ended_at")).isNull();assertThat(row().get("completion_assessment_snapshot")).isNull();
+        assertThat(row().get("last_workout_synced_at")).isEqualTo(stored.get("last_workout_synced_at"));
+        assertThat(jdbc.queryForList("SELECT * FROM performed_sets WHERE session_id=?",session)).isEqualTo(sets);
+        assertThat(count("cardio_results")).isEqualTo(1);assertThat(jdbc.queryForObject("SELECT status FROM session_weight_approval_requests WHERE id=?",String.class,request.id())).isEqualTo("PENDING");
+        var closed=row();error(save(3,value),409,"SESSION_AUTO_CLOSED");error(finish(3,value),409,"SESSION_AUTO_CLOSED");assertThat(row()).isEqualTo(closed);
+    }
+
+    @Test void noOpActivityDoesNotDelayExpiryAndGetCommitsItOutsideReadOnlyQuery() throws Exception {
+        var base=initialState();var started=row();EmailOtpFixtures.CLOCK.advance(Duration.ofHours(23));
+        node(save(1,base));node(save(2,base));node(save(2,base));node(browser.get(path()));
+        UUID next=UUID.randomUUID();node(browser.send("POST",path()+"/takeover",json(takeoverBody(next,"0")),csrf));
+        assertThat(row().get("last_workout_synced_at")).isEqualTo(started.get("last_workout_synced_at"));
+        EmailOtpFixtures.CLOCK.advance(Duration.ofHours(1));var result=node(browser.get(path()));
+        assertThat(result.get("status").asString()).isEqualTo("AUTO_CLOSED");assertThat(result.get("snapshot").get("state").get("cardioResults").isEmpty()).isTrue();
+        assertThat(node(browser.get(BASE+"/active")).get("session").isNull()).isTrue();
+    }
+
+    @Test void actualStateChangeBeforeDeadlineExtendsExpiryButOneMillisecondAtDeadlineDoesNot() throws Exception {
+        var base=initialState();EmailOtpFixtures.CLOCK.advance(Duration.ofHours(24).minusMillis(1));
+        node(save(1,confirmed(base,new int[]{8},new Context("INITIAL_APPROVED",null))));var saved=row();
+        EmailOtpFixtures.CLOCK.advance(Duration.ofMillis(1));assertThat(node(browser.get(path())).get("status").asString()).isEqualTo("ACTIVE");
+        EmailOtpFixtures.CLOCK.advance(Duration.ofHours(24).minusMillis(1));node(browser.get(path()));assertThat(row().get("status")).isEqualTo("AUTO_CLOSED");
+        assertThat(row().get("last_workout_synced_at")).isEqualTo(saved.get("last_workout_synced_at"));assertThat(count("performed_sets")).isEqualTo(1);
+    }
+
+    @Test void newStartClosesOldExpiredSessionAndOnlyCreatesOneNewActive() throws Exception {
+        var base=initialState();UUID old=session;node(save(1,confirmed(base,new int[]{8},new Context("INITIAL_APPROVED",null))));
+        EmailOtpFixtures.CLOCK.advance(Duration.ofHours(24));session=UUID.randomUUID();node(start(startBody()));
+        assertThat(jdbc.queryForObject("SELECT status FROM workout_sessions WHERE id=?",String.class,old)).isEqualTo("AUTO_CLOSED");
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM workout_sessions WHERE user_id=? AND status='ACTIVE'",Integer.class,owner.id())).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM performed_sets WHERE session_id=?",Integer.class,old)).isEqualTo(1);
+    }
+
+    @Test void reservationJobRechecksRowsIsIdempotentAndCatchesUpOnRestart() throws Exception {
+        var base=initialState();node(save(1,confirmed(base,new int[]{8,8},new Context("INITIAL_APPROVED",null))));
+        var service=app.getBean(WorkoutSessionService.class);EmailOtpFixtures.CLOCK.advance(Duration.ofHours(24));
+        new WorkoutExpiryJob(service).closeExpired();assertThat(row().get("status")).isEqualTo("AUTO_CLOSED");var closed=row();
+        new WorkoutExpiryJob(service).closeExpired();assertThat(row()).isEqualTo(closed);assertThat(count("performed_sets")).isEqualTo(2);
+    }
+
+    @ParameterizedTest @ValueSource(strings={"insert into performed_sets","insert into progress_change_events","update workout_sessions","closure"})
+    void finishSqlFailureRollsBackSnapshotApprovalAssessmentAndClosure(String failingSql) throws Exception {
+        var base=initialState();var before=row();var request=approval(base,1,null,0,"60","65");
+        var one=set(base,UUID.randomUUID(),1,"65",8,new Context("APPROVAL_REQUEST",request.id()));var value=state(base,List.of(one),List.of(),List.of(),List.of(),List.of(request));
+        var once=new AtomicBoolean();var updates=new AtomicInteger();WorkoutReadFixtures.observer=event->{
+            boolean target=event.before()&&(failingSql.equals("closure")?event.sql().startsWith("update workout_sessions")&&updates.incrementAndGet()==2:event.sql().startsWith(failingSql));
+            if(target&&once.compareAndSet(false,true)){
+            try(var statement=event.connection().createStatement()){statement.execute("SELECT 1/0");}catch(java.sql.SQLException e){throw new org.springframework.dao.DataAccessResourceFailureException("isolated finish failure",e);}
+        }};
+        try{error(finish(1,value),503,"WORKOUT_DATA_UNAVAILABLE");}finally{WorkoutReadFixtures.observer=null;}
+        assertThat(row()).isEqualTo(before);assertThat(count("performed_sets")).isZero();assertThat(eventCount()).isZero();assertThat(count("session_weight_approval_requests")).isZero();assertThat(routineVersion()).isZero();
+        node(finish(1,value));
+    }
+
+    @Test void finishClockAndAuthenticationFailuresNeverCommitFinalSnapshot() throws Exception {
+        var base=initialState();var value=confirmed(base,new int[]{8,8,8},new Context("INITIAL_APPROVED",null));var before=row();var body=finishBody(1,value);
+        error(browser.send("POST",path()+"/finish",json(body),null),403,"CSRF_INVALID");
+        try(var anonymous=new Browser()){error(anonymous.send("POST",path()+"/finish",json(body),null),401,"AUTHENTICATION_REQUIRED");}
+        try(var foreign=new Browser()){foreign.login(UUID.randomUUID()+"@example.test");error(foreign.send("POST",path()+"/finish",json(body),foreign.csrf()),404,"SESSION_NOT_FOUND");}
+        body.put("dataGeneration","1");error(sendFinish(body),409,"DATA_GENERATION_MISMATCH");body.put("dataGeneration","0");
+        body.put("writerEpoch","1");error(sendFinish(body),409,"EDITOR_OWNERSHIP_LOST");body.put("writerEpoch","0");
+        body.put("endedAt","2026-10-31T16:01:00Z");error(sendFinish(body),422,"CLOCK_CONTEXT_INVALID");
+        assertThat(row()).isEqualTo(before);assertThat(count("performed_sets")).isZero();
+    }
+
+    @Test void cardioOnlyFinishHasNoFabricatedWeightAssessmentOrTargetDuration() throws Exception {
+        var update=updateRoutine();update.put("weightPlacements",List.of());node(browser.send("PUT",routinePath(),json(update),csrf));
+        var base=initialState();var value=state(base,List.of(),List.of(completedCardio(base,UUID.randomUUID())),List.of(),List.of(),List.of());
+        var result=node(finish(1,value));assertThat(result.get("completionAssessment").get("overallWeightPlanComplete").isNull()).isTrue();
+        assertThat(result.get("completionAssessment").get("exercises").isEmpty()).isTrue();assertThat(count("performed_sets")).isZero();
+        assertThat(jdbc.queryForObject("SELECT active_ms FROM cardio_results WHERE session_id=?",Long.class,session)).isEqualTo(60000L);
+    }
+
+    @Test void realScheduledJobClosesPersistedOverdueRowsOnApplicationRestart() throws Exception {
+        var base=initialState();node(save(1,confirmed(base,new int[]{8},new Context("INITIAL_APPROVED",null))));EmailOtpFixtures.CLOCK.advance(Duration.ofHours(24));
+        var key=new byte[32];new java.security.SecureRandom().nextBytes(key);
+        try(var restarted=new SpringApplicationBuilder(OverloadServerApplication.class,EmailOtpFixtures.class).web(WebApplicationType.NONE)
+                .run("--spring.profiles.active=integration","--spring.datasource.url="+POSTGRES.getJdbcUrl(),"--spring.datasource.username="+POSTGRES.getUsername(),"--spring.datasource.password="+POSTGRES.getPassword(),
+                        "--OTP_HMAC_KEY="+Base64.getEncoder().encodeToString(key),"--OTP_EMAIL_ENABLED=false","--GOOGLE_OIDC_ENABLED=false","--GOOGLE_REAUTH_ENABLED=false",
+                        "--overload.workout.expiry.enabled=true","--overload.workout.expiry.delay-ms=20","--logging.level.root=WARN","--spring.main.banner-mode=off")) {
+            MixedPersistenceAssertions.verify(restarted);
+            long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(5);
+            while(row().get("status").equals("ACTIVE")&&System.nanoTime()<deadline)Thread.sleep(20);
+            assertThat(row().get("status")).isEqualTo("AUTO_CLOSED");assertThat(row().get("completion_assessment_snapshot")).isNull();assertThat(count("performed_sets")).isEqualTo(1);
+        }
+    }
+
+    @ParameterizedTest @ValueSource(strings={"snapshot","takeover","duplicate","job"})
+    void finishSerializesCompetingWritesAndExpiryWithoutDuplicatingClosure(String action) throws Exception {
+        var base=initialState();var value=confirmed(base,new int[]{8,8,8},new Context("INITIAL_APPROVED",null));
+        var locked=new CountDownLatch(1);var release=new CountDownLatch(1);var once=new AtomicBoolean();
+        WorkoutReadFixtures.observer=event->{if(!event.before()&&event.sql().startsWith("update workout_sessions")&&once.compareAndSet(false,true)){locked.countDown();await(release);}};
+        try(var executor=Executors.newFixedThreadPool(2)) {
+            var finishing=executor.submit(()->finish(1,value));assertThat(locked.await(10,TimeUnit.SECONDS)).isTrue();
+            if(action.equals("job")) {
+                EmailOtpFixtures.CLOCK.advance(Duration.ofHours(24));
+                executor.submit(()->app.getBean(WorkoutSessionService.class).expireBatch()).get(10,TimeUnit.SECONDS);
+                release.countDown();
+            } else {
+                var other=executor.submit(()->switch(action){case "snapshot"->save(2,value);case "takeover"->browser.send("POST",path()+"/takeover",json(takeoverBody(UUID.randomUUID(),"0")),csrf);default->finish(1,value);});
+                try{assertLockWait("workout_sessions");}finally{release.countDown();}
+                var response=other.get(15,TimeUnit.SECONDS);
+                if(action.equals("duplicate"))assertThat(node(response).get("duplicate").asBoolean()).isTrue();else error(response,409,"SESSION_NOT_ACTIVE");
+            }
+            assertThat(finishing.get(15,TimeUnit.SECONDS).statusCode()).isEqualTo(200);
+        }finally{release.countDown();WorkoutReadFixtures.observer=null;}
+        assertThat(row().get("status")).isEqualTo("FINISHED");assertThat(row().get("version")).isEqualTo(1L);assertThat(count("performed_sets")).isEqualTo(3);
+    }
+
+    @Test void automaticClosureWinsAgainstLateFinishAtRealTransactionBoundary() throws Exception {
+        var base=initialState();var value=confirmed(base,new int[]{8},new Context("INITIAL_APPROVED",null));node(save(1,value));
+        EmailOtpFixtures.CLOCK.advance(Duration.ofHours(24));
+        // Only this disposable fixture's row is due, so the observed worker lock belongs to this test.
+        jdbc.update("UPDATE workout_sessions SET last_workout_synced_at=? WHERE status='ACTIVE' AND user_id<>?",java.sql.Timestamp.from(EmailOtpFixtures.CLOCK.instant().plus(Duration.ofHours(24))),owner.id());
+        var locked=new CountDownLatch(1);var release=new CountDownLatch(1);var once=new AtomicBoolean();
+        WorkoutReadFixtures.observer=event->{if(!event.before()&&event.sql().startsWith("update workout_sessions")&&once.compareAndSet(false,true)){locked.countDown();await(release);}};
+        try(var executor=Executors.newFixedThreadPool(2)) {
+            var closing=executor.submit(()->app.getBean(WorkoutSessionService.class).expireBatch());assertThat(locked.await(10,TimeUnit.SECONDS)).isTrue();
+            var finishing=executor.submit(()->finish(2,value));
+            try{assertLockWait("workout_sessions");}finally{release.countDown();}
+            assertThat(closing.get(15,TimeUnit.SECONDS)).isGreaterThan(0);error(finishing.get(15,TimeUnit.SECONDS),409,"SESSION_AUTO_CLOSED");
+        }finally{release.countDown();WorkoutReadFixtures.observer=null;}
+        assertThat(row().get("status")).isEqualTo("AUTO_CLOSED");assertThat(row().get("ended_at")).isNull();assertThat(count("performed_sets")).isEqualTo(1);
+    }
+
+    @Test void failedAutomaticClosureRollsBackAndTheNextJobRetries() throws Exception {
+        var base=initialState();node(save(1,confirmed(base,new int[]{8},new Context("INITIAL_APPROVED",null))));EmailOtpFixtures.CLOCK.advance(Duration.ofHours(24));var before=row();
+        WorkoutReadFixtures.observer=event->{if(event.before()&&event.sql().startsWith("update workout_sessions"))throw new org.springframework.dao.DataAccessResourceFailureException("isolated expiry failure");};
+        try{app.getBean(WorkoutSessionService.class).expireBatch();}finally{WorkoutReadFixtures.observer=null;}
+        assertThat(row()).isEqualTo(before);app.getBean(WorkoutSessionService.class).expireBatch();assertThat(row().get("status")).isEqualTo("AUTO_CLOSED");assertThat(count("performed_sets")).isEqualTo(1);
+    }
+
+    State initialStateAt(String started) throws Exception {var body=startBody();body.put("startedAt",started);return JSON.treeToValue(node(start(body)).get("snapshot").get("state"),State.class);}
+    State confirmed(State base,int[] reps,Context context) {
+        var values=new ArrayList<SetValue>();var started=((java.sql.Timestamp)row().get("started_at")).toInstant();
+        for(int i=0;i<reps.length;i++) values.add(new SetValue(UUID.randomUUID(),base.appliedPlan().weightExercises().getFirst().sessionExerciseId(),i+1,"60",reps[i],started.plusSeconds(120+i),context));
+        return state(base,values,List.of(),List.of(),List.of(),List.of());
+    }
+    Map<String,Object> finishBody(long revision,State state) {var body=saveBody(revision,state);body.put("endedAt","2026-10-31T16:10:00Z");return body;}
+    HttpResponse<String> sendFinish(Map<String,Object> body)throws Exception{return browser.send("POST",path()+"/finish",json(body),csrf);}
+    HttpResponse<String> finish(long revision,State state)throws Exception{return sendFinish(finishBody(revision,state));}
 
     State initialState() throws Exception { return JSON.treeToValue(node(start(startBody())).get("snapshot").get("state"), State.class); }
     static State state(State base,List<SetValue> sets,List<Cardio> cardio,List<UUID> deletedSets,List<UUID> deletedCardio,List<Approval> approvals) {

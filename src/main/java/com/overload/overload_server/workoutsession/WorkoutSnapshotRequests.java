@@ -11,6 +11,13 @@ import static com.overload.overload_server.workoutsession.WorkoutSnapshotData.*;
 import static com.overload.overload_server.workoutsession.WorkoutSessionFailure.Reason.*;
 final class WorkoutSnapshotRequests {
     private static final JsonMapper JSON = JsonMapper.builder().enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION).build();
+    static Finish finish(String raw) {
+        var body=parse(raw);
+        fields(body,"dataGeneration","editorDeviceId","writerEpoch","localRevision","snapshot","endedAt");
+        var state=new LinkedHashMap<String,JsonNode>();
+        for (String field:List.of("dataGeneration","editorDeviceId","writerEpoch","localRevision","snapshot")) state.put(field,body.get(field));
+        return new Finish(save(JSON.writeValueAsString(state)),time(body,"endedAt"));
+    }
     static Save save(String raw) {
         var body = parse(raw);
         fields(body, "dataGeneration", "editorDeviceId", "writerEpoch", "localRevision", "snapshot");

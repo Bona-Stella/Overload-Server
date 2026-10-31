@@ -35,4 +35,15 @@ class WorkoutSnapshotRequestsTests {
         assertThat(differentOrder).isNotEqualTo(object.toString());
         assertThat(WorkoutSnapshotRequests.save(differentOrder)).isEqualTo(WorkoutSnapshotRequests.save(body("\"1\"","3")));
     }
+    @Test void finishReusesExactSnapshotShapeAndRequiresOriginalClientEndTime() {
+        var object=WorkoutSnapshotData.JSON.readTree(body("\"1\"","3"));
+        var values=new LinkedHashMap<String,tools.jackson.databind.JsonNode>();object.propertyNames().forEach(name->values.put(name,object.get(name)));
+        values.put("endedAt",WorkoutSnapshotData.JSON.valueToTree("2026-10-31T16:10:00.123Z"));
+        var parsed=WorkoutSnapshotRequests.finish(WorkoutSnapshotData.JSON.writeValueAsString(values));
+        assertThat(parsed.state()).isEqualTo(WorkoutSnapshotRequests.save(body("\"1\"","3")));
+        assertThat(parsed.endedAt()).isEqualTo(java.time.Instant.parse("2026-10-31T16:10:00.123Z"));
+        assertThatThrownBy(()->WorkoutSnapshotRequests.finish(body("\"1\"","3"))).isInstanceOf(WorkoutSessionFailure.class);
+        values.put("endedAt",WorkoutSnapshotData.JSON.valueToTree("2026-10-31T16:10:00.1234Z"));
+        assertThatThrownBy(()->WorkoutSnapshotRequests.finish(WorkoutSnapshotData.JSON.writeValueAsString(values))).isInstanceOf(WorkoutSessionFailure.class);
+    }
 }

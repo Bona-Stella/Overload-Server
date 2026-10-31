@@ -15,6 +15,12 @@ public class WorkoutSessionController {
     private final WorkoutSessionService service;
     private final WorkoutSnapshotService snapshots;
     WorkoutSessionController(WorkoutSessionService service,WorkoutSnapshotService snapshots) { this.service = service; this.snapshots=snapshots; }
+    @PostMapping(value="/{id}/finish",consumes="application/json")
+    ResponseEntity<WorkoutSnapshotData.FinishAck> finish(@AuthenticationPrincipal SessionPrincipal principal,
+            @PathVariable String id,@RequestBody String body,HttpServletRequest request) {
+        validate(request,false);
+        return ok(snapshots.finish(principal.userId(),WorkoutSessionRequests.uuid(id),WorkoutSnapshotRequests.finish(body)));
+    }
     @PutMapping(value="/{id}/snapshot",consumes="application/json")
     ResponseEntity<WorkoutSnapshotData.Ack> snapshot(@AuthenticationPrincipal SessionPrincipal principal,
             @PathVariable String id,@RequestBody String body,HttpServletRequest request){

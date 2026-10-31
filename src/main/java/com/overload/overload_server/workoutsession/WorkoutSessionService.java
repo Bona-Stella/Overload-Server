@@ -31,15 +31,24 @@ public class WorkoutSessionService {
     WorkoutSessionResponses.Started start(UUID owner, WorkoutSessionRequests.Start input) {
         return transaction(starts, () -> {
             owner(owner, input.dataGeneration());
-            var previous = sessions.find(owner, input.dataGeneration(), input.id(), false);
-            if (previous.isPresent()) {
-                if (!previous.get().sameStart(input)) throw new WorkoutSessionFailure(SESSION_ID_CONFLICT);
-                return new WorkoutSessionResponses.Started(false, response(previous.get()));
+            if (sessions.exists(owner,input.dataGeneration(),input.id())) {
+                var previous=find(owner,input.dataGeneration(),input.id(),true);
+                if (!previous.sameStart(input)) throw new WorkoutSessionFailure(SESSION_ID_CONFLICT);
+                previous.expireIfDue(clock.instant()); sessions.flush();
+                return new WorkoutSessionResponses.Started(false, response(previous));
             }
             if (sessions.occupied(input.id())) throw new WorkoutSessionFailure(SESSION_ID_CONFLICT);
-            if (sessions.active(owner, input.dataGeneration()).isPresent()) throw new WorkoutSessionFailure(ACTIVE_SESSION_EXISTS);
+            var active=sessions.activeId(owner,input.dataGeneration());
+            if (active.isPresent()&&sessions.activeNotDue(owner,input.dataGeneration(),clock.instant().minus(java.time.Duration.ofHours(24))))
+                throw new WorkoutSessionFailure(ACTIVE_SESSION_EXISTS);
+            // Preserve routine -> definition -> session order, including expiry during a new START.
             var source = routines.planForWorkoutStart(owner, input.dataGeneration(), input.routineId())
                     .orElseThrow(() -> new WorkoutSessionFailure(ROUTINE_NOT_FOUND));
+            if (active.isPresent()) {
+                var previous=find(owner,input.dataGeneration(),active.get(),true);
+                previous.expireIfDue(clock.instant()); sessions.flush();
+                if (previous.status.equals("ACTIVE")) throw new WorkoutSessionFailure(ACTIVE_SESSION_EXISTS);
+            }
             var session = WorkoutSession.start(owner, input, InitialPlan.copy(source), clock.instant());
             sessions.insert(session); sessions.flush();
             snapshots.initialize(session);sessions.flush();
@@ -47,6 +56,7 @@ public class WorkoutSessionService {
         });
     }
     WorkoutSessionResponses.Active active(UUID owner) {
+        expireForRead(owner,null);
         return transaction(reads, () -> {
             long generation = sessions.generation(owner, false);
             return new WorkoutSessionResponses.Active(owner, Long.toString(generation),
@@ -54,15 +64,47 @@ public class WorkoutSessionService {
         });
     }
     WorkoutSessionResponses.Detail detail(UUID owner, UUID id) {
+        expireForRead(owner,id);
         return transaction(reads, () -> response(find(owner, sessions.generation(owner, false), id, false)));
     }
     WorkoutSessionResponses.Detail takeover(UUID owner, UUID id, WorkoutSessionRequests.Takeover input) {
-        return transaction(writes, () -> {
+        var result=transaction(writes, () -> {
             owner(owner, input.dataGeneration());
             var session = find(owner, input.dataGeneration(), id, true);
+            if (session.expireIfDue(clock.instant())) { sessions.flush(); return null; }
+            if (session.status.equals("AUTO_CLOSED")) return null;
             session.takeover(input, clock.instant()); sessions.flush();
             return response(session);
         });
+        if (result==null) throw new WorkoutSessionFailure(SESSION_AUTO_CLOSED);
+        return result;
+    }
+    private void expireForRead(UUID owner,UUID id) {
+        transaction(writes,()->{
+            long generation=sessions.generation(owner,true);
+            var target=id==null?sessions.activeId(owner,generation):java.util.Optional.of(id);
+            target.flatMap(value->sessions.find(owner,generation,value,true)).ifPresent(value->value.expireIfDue(clock.instant()));
+            sessions.flush(); return null;
+        });
+    }
+    int expireBatch() {
+        int closed=0;
+        var candidates=sessions.expiryCandidates(clock.instant().minus(java.time.Duration.ofHours(24)));
+        for (var candidate:candidates) {
+            try {
+                boolean changed=Boolean.TRUE.equals(transaction(writes,()->{
+                    var generation=sessions.currentGeneration(candidate.owner());
+                    if (generation.isEmpty()||generation.get()!=candidate.generation()) return false;
+                    var session=sessions.lockSkippingBusy(candidate);
+                    boolean expired=session.isPresent()&&session.get().expireIfDue(clock.instant());
+                    sessions.flush(); return expired;
+                }));
+                if (changed) closed++;
+            } catch (RuntimeException failure) {
+                org.slf4j.LoggerFactory.getLogger(WorkoutSessionService.class).warn("Workout expiry transaction failed type={}",failure.getClass().getSimpleName());
+            }
+        }
+        return closed;
     }
     private WorkoutSessionResponses.Detail response(WorkoutSession value){return WorkoutSessionResponses.detail(value,snapshots.view(value));}
     private void owner(UUID owner, long expected) {

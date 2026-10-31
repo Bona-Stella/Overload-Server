@@ -10,6 +10,7 @@ import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.*;
+import java.time.temporal.ChronoUnit;
 import java.util.*;
 import java.util.function.*;
 import java.util.stream.Collectors;
@@ -21,80 +22,141 @@ public class WorkoutSnapshotService {
     private final WorkoutSessionRepository sessions;
     private final WorkoutSnapshotRepository data;
     private final RoutineRepository routines;
+    private final WorkoutAssessment assessments;
     private final Clock clock;
     private final TransactionTemplate writes;
-    WorkoutSnapshotService(WorkoutSessionRepository sessions, WorkoutSnapshotRepository data, RoutineRepository routines, ObjectProvider<Clock> clocks,
+    WorkoutSnapshotService(WorkoutSessionRepository sessions, WorkoutSnapshotRepository data, RoutineRepository routines, WorkoutAssessment assessments,ObjectProvider<Clock> clocks,
         @Qualifier("workoutTransactionManager") PlatformTransactionManager manager) {
         this.sessions = sessions;
         this.data = data;
         this.routines = routines;
+        this.assessments=assessments;
         clock = clocks.getIfAvailable(Clock::systemUTC);
         writes = new TransactionTemplate(manager);
     }
 
     Ack save(UUID owner, UUID id, Save input) {
-        return transaction(() -> {
-            owner(owner, input.dataGeneration());
-            UUID source = data.source(owner, input.dataGeneration(), id);
-            // scalar only: never caches the session before its lock
-            var scope = input.snapshot().approvalRequests().isEmpty()?null:routines.lockForWorkoutApproval(owner, input.dataGeneration(), source);
-            var definitions = data.definitions(owner, input.dataGeneration(), input.snapshot().sessionExercises().stream().filter(e -> e.kind().equals("WEIGHT")).map(Exercise::exerciseDefinitionId).distinct().toList());
-            var session = find(owner, input.dataGeneration(), id);
-            guard(session, input.editorDeviceId(), input.writerEpoch());
-            String hash = hash(input);
-            if (input.localRevision()<session.localRevision)throw failure(REVISION_STALE);
-            if (input.localRevision()==session.localRevision) {
-                if (!hash.equals(session.lastSnapshotHash))throw failure(REVISION_PAYLOAD_MISMATCH);
-                return ack(session, true);
+        var result=transaction(() -> {
+            var locked=lock(owner,id,input);
+            var session=locked.session();
+            if (expired(session)) return null;
+            guard(session,input.editorDeviceId(),input.writerEpoch());
+            boolean duplicate=applySnapshot(session,input,locked.definitions(),locked.scope());
+            return ack(session,duplicate);
+        });
+        if (result==null) throw failure(SESSION_AUTO_CLOSED);
+        return result;
+    }
+
+    FinishAck finish(UUID owner,UUID id,Finish input) {
+        var result=transaction(()->{
+            Save state=input.state();
+            var locked=lock(owner,id,state);var session=locked.session();
+            if (expired(session)) return null;
+            if (session.writerEpoch!=state.writerEpoch()||!session.editorDeviceId.equals(state.editorDeviceId())) throw failure(EDITOR_OWNERSHIP_LOST);
+            if (session.status.equals("FINISHED")) {
+                if (session.localRevision!=state.localRevision()||!hash(state).equals(session.lastSnapshotHash)||!input.endedAt().equals(session.endedAt)) throw failure(FINISH_REQUEST_MISMATCH);
+                return finishAck(session,true);
             }
-            incrementable(session);
-            var items = index(data.exercises(id), e -> e.id);
-            for (var item:input.snapshot().sessionExercises()) {
-                var old = items.get(item.id());
-                if (old!=null) {
-                    if (!old.value().equals(item))throw failure(IMMUTABLE_RECORD_CONTEXT);
+            guard(session,state.editorDeviceId(),state.writerEpoch());
+            afterStart(session,input.endedAt());
+            var known=data.approvals(id).stream().map(r->r.id).collect(Collectors.toSet());
+            for (var request:state.snapshot().approvalRequests()) if (!known.contains(request.id())&&request.occurredAt().isAfter(input.endedAt())) throw failure(CLOCK_CONTEXT_INVALID);
+            boolean duplicateSnapshot=applySnapshot(session,state,locked.definitions(),locked.scope());
+            for (var set:data.sets(id)) if (set.deletedAt==null&&set.completedAt.isAfter(input.endedAt())) throw failure(CLOCK_CONTEXT_INVALID);
+            for (var cardio:data.cardio(id)) if (cardio.deletedAt==null&&cardio.occurredAt.isAfter(input.endedAt())) throw failure(CLOCK_CONTEXT_INVALID);
+            if (duplicateSnapshot) { incrementable(session);session.version++; }
+            Instant now=clock.instant().truncatedTo(ChronoUnit.MICROS);session.updatedAt=now;
+            session.completionAssessment=json(assessments.assess(session,now));
+            session.endedAt=input.endedAt();session.closedAt=now;session.status="FINISHED";
+            data.flush();return finishAck(session,false);
+        });
+        if (result==null) throw failure(SESSION_AUTO_CLOSED);
+        return result;
+    }
+
+    private FinishAck finishAck(WorkoutSession session,boolean duplicate) {
+        var assessment=JSON.readValue(session.completionAssessment,WorkoutAssessment.Result.class);
+        return new FinishAck(session.userId,Long.toString(session.dataGeneration),session.id,session.status,Long.toString(session.writerEpoch),
+                Long.toString(session.localRevision),assessment.sessionVersion(),session.lastSnapshotSavedAt,session.lastWorkoutSyncedAt,
+                session.endedAt,session.closedAt,duplicate,data.results(session.id,data.approvals(session.id)),assessment);
+    }
+
+    private record Locked(WorkoutSession session, RoutineRepository.ApprovalScope scope,
+            Map<UUID,com.overload.overload_server.exercise.ExerciseDefinition> definitions) { }
+
+    private Locked lock(UUID owner,UUID id,Save input) {
+        owner(owner,input.dataGeneration());
+        UUID source=data.source(owner,input.dataGeneration(),id);
+        var scope=input.snapshot().approvalRequests().isEmpty()?null:routines.lockForWorkoutApproval(owner,input.dataGeneration(),source);
+        var definitions=data.definitions(owner,input.dataGeneration(),input.snapshot().sessionExercises().stream()
+                .filter(e->e.kind().equals("WEIGHT")).map(Exercise::exerciseDefinitionId).distinct().toList());
+        return new Locked(find(owner,input.dataGeneration(),id),scope,definitions);
+    }
+
+    private boolean expired(WorkoutSession session) {
+        if (session.expireIfDue(clock.instant())) data.flush();
+        return session.status.equals("AUTO_CLOSED");
+    }
+
+    private boolean applySnapshot(WorkoutSession session,Save input,
+            Map<UUID,com.overload.overload_server.exercise.ExerciseDefinition> definitions,RoutineRepository.ApprovalScope scope) {
+        UUID id=session.id;
+        String hash = hash(input);
+        if (input.localRevision()<session.localRevision)throw failure(REVISION_STALE);
+        if (input.localRevision()==session.localRevision) {
+            if (!hash.equals(session.lastSnapshotHash))throw failure(REVISION_PAYLOAD_MISMATCH);
+            return true;
+        }
+        incrementable(session);
+        var items = index(data.exercises(id), e -> e.id);
+        for (var item:input.snapshot().sessionExercises()) {
+            var old = items.get(item.id());
+            if (old!=null) {
+                if (!old.value().equals(item))throw failure(IMMUTABLE_RECORD_CONTEXT);
+            }
+            else {
+                available("session_exercises", item.id());
+                String name = null;
+                if (item.kind().equals("WEIGHT")) {
+                    var definition = definitions.get(item.exerciseDefinitionId());
+                    if (definition==null||definition.getDeletedAt()!=null)throw failure(EXERCISE_NOT_FOUND);
+                    name = definition.getName();
                 }
-                else {
-                    available("session_exercises", item.id());
-                    String name = null;
-                    if (item.kind().equals("WEIGHT")) {
-                        var definition = definitions.get(item.exerciseDefinitionId());
-                        if (definition==null||definition.getDeletedAt()!=null)throw failure(EXERCISE_NOT_FOUND);
-                        name = definition.getName();
-                    }
-                    var added = new SessionExercise(session, item, name);
-                    data.insert(added);
-                    items.put(added.id, added);
-                }
+                var added = new SessionExercise(session, item, name);
+                data.insert(added);
+                items.put(added.id, added);
             }
-            validatePlan(input.snapshot().appliedPlan(), items);
-            var approvals = index(data.approvals(id), r -> r.id);
-            var applied = approvals(session, input.snapshot().approvalRequests(), items, approvals, scope, false);
-            boolean changed = facts(session, input.snapshot(), items, approvals);
-            var oldPlan = JSON.readValue(session.appliedPlan, Plan.class);
-            if (!oldPlan.equals(input.snapshot().appliedPlan())) {
-                session.appliedPlan = json(input.snapshot().appliedPlan());
-                changed = true;
-            }
-            completeApprovals(scope, applied);
-            Instant now = clock.instant();
-            session.version++;
-            session.updatedAt = now;
-            session.localRevision = input.localRevision();
-            session.lastSnapshotHash = hash;
-            session.lastSnapshotSavedAt = now;
-            if (changed)session.lastWorkoutSyncedAt = now;
-            data.flush();
-            return ack(session, false);
-            });
+        }
+        validatePlan(input.snapshot().appliedPlan(), items);
+        var approvals = index(data.approvals(id), r -> r.id);
+        var applied = approvals(session, input.snapshot().approvalRequests(), items, approvals, scope, false);
+        boolean changed = facts(session, input.snapshot(), items, approvals);
+        var oldPlan = JSON.readValue(session.appliedPlan, Plan.class);
+        if (!oldPlan.equals(input.snapshot().appliedPlan())) {
+            session.appliedPlan = json(input.snapshot().appliedPlan());
+            changed = true;
+        }
+        completeApprovals(scope, applied);
+        Instant now = clock.instant().truncatedTo(ChronoUnit.MICROS);
+        session.version++;
+        session.updatedAt = now;
+        session.localRevision = input.localRevision();
+        session.lastSnapshotHash = hash;
+        session.lastSnapshotSavedAt = now;
+        if (changed)session.lastWorkoutSyncedAt = now;
+        data.flush();
+        return false;
     }
 
     Resolution resolve(UUID owner, UUID id, Resolve input) {
-        return transaction(() -> {
+        var result=transaction(() -> {
             owner(owner, input.dataGeneration());
             UUID source = data.source(owner, input.dataGeneration(), id);
             var scope = input.decision().equals("REAPPROVE")?routines.lockForWorkoutApproval(owner, input.dataGeneration(), source):null;
             var session = find(owner, input.dataGeneration(), id);
+            if (session.expireIfDue(clock.instant())) { data.flush(); return null; }
+            if (session.status.equals("AUTO_CLOSED")) return null;
             guard(session, input.editorDeviceId(), input.writerEpoch());
             var requests = index(data.approvals(id), r -> r.id);
             var selected = new ArrayList<WeightApprovalRequest>();
@@ -142,6 +204,8 @@ public class WorkoutSnapshotService {
             data.flush();
             return resolution(session);
             });
+        if (result==null) throw failure(SESSION_AUTO_CLOSED);
+        return result;
     }
 
     private List<WeightApprovalRequest> approvals(WorkoutSession session, List<Approval> inputs, Map<UUID, SessionExercise> items,

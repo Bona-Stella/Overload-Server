@@ -4,6 +4,7 @@ import jakarta.persistence.*;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 import java.time.*;
+import java.time.temporal.ChronoUnit;
 import java.util.UUID;
 import static com.overload.overload_server.workoutsession.WorkoutSessionFailure.Reason.*;
 
@@ -31,10 +32,23 @@ public class WorkoutSession {
     @JdbcTypeCode(SqlTypes.JSON) @Column(name="applied_plan_snapshot",nullable=false,columnDefinition="jsonb") String appliedPlan;
     @Column(name="last_snapshot_hash",columnDefinition="text") String lastSnapshotHash;
     @Column(name="last_snapshot_saved_at") Instant lastSnapshotSavedAt;
+    @Column(name="ended_at") Instant endedAt;
+    @Column(name="closed_at") Instant closedAt;
+    @JdbcTypeCode(SqlTypes.JSON) @Column(name="completion_assessment_snapshot",columnDefinition="jsonb") String completionAssessment;
 
     protected WorkoutSession() { }
 
+    boolean expireIfDue(Instant now) {
+        if (!status.equals("ACTIVE") || now.isBefore(lastWorkoutSyncedAt.plus(Duration.ofHours(24)))) return false;
+        if (version == Long.MAX_VALUE) throw new WorkoutSessionFailure(WRITE_CONFLICT);
+        now=now.truncatedTo(ChronoUnit.MICROS);
+        status = "AUTO_CLOSED"; closedAt = now; updatedAt = now; version++;
+        return true;
+    }
+
     static WorkoutSession start(UUID owner, WorkoutSessionRequests.Start input, InitialPlan plan, Instant now) {
+        // Server metadata must survive PostgreSQL's microsecond round trip unchanged.
+        now=now.truncatedTo(ChronoUnit.MICROS);
         var value = new WorkoutSession();
         value.id = input.id(); value.userId = owner; value.dataGeneration = input.dataGeneration();
         value.sourceRoutineId = input.routineId(); value.status = "ACTIVE";

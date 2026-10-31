@@ -40,7 +40,7 @@ class V13MigrationIntegrationTests {
             String selected=String.join(",",names.stream().map(n->"\""+n+"\"").toList()); columns.put(table,selected);
             rows.put(table,jdbc.queryForList("SELECT to_jsonb(t)::text FROM (SELECT "+selected+" FROM "+table+") t ORDER BY to_jsonb(t)::text",String.class));
         }
-        var latest=Flyway.configure().dataSource(postgres.getJdbcUrl(),postgres.getUsername(),postgres.getPassword()).load();
+        var latest=Flyway.configure().dataSource(postgres.getJdbcUrl(),postgres.getUsername(),postgres.getPassword()).target("13").load();
         assertThat(latest.migrate().migrationsExecuted).isEqualTo(1);
         for(String table:tables){
             String filter=table.equals("flyway_schema_history")?" WHERE installed_rank<=12":"";
