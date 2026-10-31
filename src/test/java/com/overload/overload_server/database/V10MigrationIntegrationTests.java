@@ -54,13 +54,23 @@ class V10MigrationIntegrationTests {
     }
     Flyway latest() {
         return Flyway.configure().dataSource(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword())
-                .locations("classpath:db/migration").load();
+                .locations("classpath:db/migration").target("10").load();
     }
     ConfigurableApplicationContext app(boolean latestSchema) {
+        if (!latestSchema) {
+            // Historical JDBC provisioning does not validate future JPA entities against V9.
+            var context = new org.springframework.context.annotation.AnnotationConfigApplicationContext();
+            context.registerBean(javax.sql.DataSource.class, () -> new DriverManagerDataSource(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword()));
+            context.registerBean(JdbcTemplate.class, () -> new JdbcTemplate(context.getBean(javax.sql.DataSource.class)));
+            context.registerBean(org.springframework.transaction.PlatformTransactionManager.class,
+                    () -> new DataSourceTransactionManager(context.getBean(javax.sql.DataSource.class)));
+            context.register(org.springframework.util.ClassUtils.resolveClassName("com.overload.overload_server.account.AccountRepository", getClass().getClassLoader()), AccountProvisioningService.class);
+            context.refresh(); return context;
+        }
         return new SpringApplicationBuilder(OverloadServerApplication.class).web(WebApplicationType.NONE)
                 .run("--spring.profiles.active=integration", "--spring.datasource.url=" + postgres.getJdbcUrl(),
                         "--spring.datasource.username=" + postgres.getUsername(), "--spring.datasource.password=" + postgres.getPassword(),
-                        "--spring.flyway.target=" + (latestSchema ? "10" : "9"),
+                        "--spring.flyway.target=11",
                         "--GOOGLE_OIDC_ENABLED=false", "--OTP_EMAIL_ENABLED=false", "--logging.level.root=WARN", "--spring.main.banner-mode=off");
     }
 

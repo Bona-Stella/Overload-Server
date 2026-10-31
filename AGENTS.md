@@ -107,7 +107,7 @@ Task 009 및 이후 운동 쓰기·진행 세션·복구 작업 시 필수:
 일반 관리는 온라인 API, 진행 운동 보호는 전체 확정 스냅샷과 IndexedDB를 기준으로 합니다.
 폐기된 범용 명령·Outbox·필드 병합·영수증/feed 구조를 다시 구현하지 않습니다.
 일반 온라인 종목 생성·이름 변경·휴식 설정 변경은 [온라인 쓰기 API 계약](docs/api/workout-online-write.md)을 따릅니다.
-루틴 쓰기·운동 세션 API·IndexedDB는 미구현입니다.
+루틴 관리 API는 [루틴 온라인 계약](docs/api/routine-management.md)을 따릅니다. V11은 격리 검증용으로 추가하며 개인 로컬 `overload_dev`에는 적용하지 않습니다. 운동 세션 API·IndexedDB는 미구현입니다.
 2026-10-31 사용자 승인으로 개인 로컬 `127.0.0.1:5433/overload_dev`에 V9/V10을 적용하고 기존 데이터를 보존했습니다.
 근거는 [실제 적용 보고서](docs/tasks/task-009-v10-local-application-report.md)를 따릅니다. 다른 DB나 후속 파괴적 마이그레이션은 이 승인에 포함되지 않습니다.
 Task 006의 운동·인증 정책은 v1.0에서 명시적으로 바꾼 부분을 제외하고 유지합니다.

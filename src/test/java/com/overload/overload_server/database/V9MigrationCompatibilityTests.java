@@ -50,13 +50,18 @@ class V9MigrationCompatibilityTests {
 		var identities = jdbc.queryForList("SELECT * FROM auth_identities ORDER BY id");
 		var exercises = jdbc.queryForList("SELECT id,user_id,data_generation,name,created_at,updated_at FROM exercise_definitions ORDER BY id");
 		var settings = jdbc.queryForList("SELECT user_id,data_generation,rest_low_seconds,rest_medium_seconds,rest_high_seconds,created_at,updated_at FROM user_workout_settings");
+		var v9 = Flyway.configure().dataSource(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword()).target("9").load();
+		v9.migrate();
+		assertThat(v9.info().current().getVersion().toString()).isEqualTo("9");
+		assertThat(jdbc.queryForList("SELECT version FROM exercise_definitions WHERE user_id=?", Long.class, owner)).containsOnly(0L);
+		assertThat(jdbc.queryForObject("SELECT count(*) FROM exercise_definitions WHERE user_id=? AND deleted_at IS NOT NULL", Integer.class, owner)).isZero();
 		try (var app = new SpringApplicationBuilder(OverloadServerApplication.class).web(WebApplicationType.NONE)
-				.run("--spring.profiles.active=integration", "--spring.flyway.target=9", "--spring.datasource.url=" + postgres.getJdbcUrl(),
+				.run("--spring.profiles.active=integration", "--spring.flyway.target=11", "--spring.datasource.url=" + postgres.getJdbcUrl(),
 						"--spring.datasource.username=" + postgres.getUsername(), "--spring.datasource.password=" + postgres.getPassword(),
 						"--GOOGLE_OIDC_ENABLED=false", "--OTP_EMAIL_ENABLED=false", "--logging.level.root=WARN", "--spring.main.banner-mode=off")) {
 			MixedPersistenceAssertions.verify(app);
 			var flyway = app.getBean(Flyway.class);
-			assertThat(flyway.info().current().getVersion().toString()).isEqualTo("9");
+			assertThat(flyway.info().current().getVersion().toString()).isEqualTo("11");
 			assertThat(Arrays.stream(flyway.info().applied()).limit(8).map(value -> value.getChecksum()).toList()).isEqualTo(checksums);
 			assertThat(jdbc.queryForList("SELECT * FROM users ORDER BY id")).isEqualTo(users);
 			assertThat(jdbc.queryForList("SELECT * FROM auth_identities ORDER BY id")).isEqualTo(identities);

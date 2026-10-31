@@ -72,7 +72,7 @@ import static org.mockito.Mockito.when;
 		SecurityFixtures.class, SecurityFixtures.FixtureController.class})
 @MockitoBean(types = {JdbcTemplate.class, PlatformTransactionManager.class, EmailOtpService.class, EmailIdentityService.class, OtpEmailSender.class,
 		com.overload.overload_server.workout.WorkoutReadService.class,
-		com.overload.overload_server.workout.WorkoutWriteService.class})
+		com.overload.overload_server.routine.RoutineService.class, com.overload.overload_server.routine.RoutineRepository.class, com.overload.overload_server.workout.WorkoutWriteService.class})
 class RequestIdHttpTests {
 
 	private static final JsonMapper JSON = JsonMapper.builder().build();

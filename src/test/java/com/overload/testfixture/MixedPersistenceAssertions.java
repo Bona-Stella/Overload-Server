@@ -30,7 +30,7 @@ public final class MixedPersistenceAssertions {
 		assertThat(jpa.getEntityManagerFactory()).isSameAs(factory);
 		assertThat(((EntityManagerFactoryInfo) factory).getDataSource()).isSameAs(dataSource);
 		assertThat(factory.getMetamodel().getEntities()).extracting(entity -> entity.getJavaType().getName())
-				.containsExactlyInAnyOrder(ExerciseDefinition.class.getName(), UserWorkoutSettings.class.getName());
+				.containsExactlyInAnyOrder(ExerciseDefinition.class.getName(), UserWorkoutSettings.class.getName(), com.overload.overload_server.routine.Routine.class.getName(), com.overload.overload_server.routine.RoutineWeightPlacement.class.getName(), com.overload.overload_server.routine.RoutineCardioPlacement.class.getName(), com.overload.overload_server.routine.ProgressChangeEvent.class.getName());
 		assertThat(app.getEnvironment().getProperty("spring.jpa.hibernate.ddl-auto")).isEqualTo("validate");
 		assertThat(app.getEnvironment().getProperty("spring.jpa.open-in-view")).isEqualTo("false");
 		assertThat(app.getEnvironment().getPropertySources()).noneMatch(source -> source.getName().contains(".env"));
