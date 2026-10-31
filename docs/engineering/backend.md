@@ -23,7 +23,9 @@ Task 007의 확정 정책과 구현 단계는 [Task 006 최종 설계 v0.3.1](..
 운동 쓰기·진행 세션·복구는 [Task 009 v1.0](../tasks/task-009-redesign-v1.0.md)이 우선합니다.
 Task 006의 나머지 운동·인증 정책과 기존 Task 008 조회 계약은 유지합니다.
 일반 온라인 종목 생성·이름 변경·휴식 설정 변경은 [온라인 쓰기 API 계약](../api/workout-online-write.md)을 따릅니다.
-웨이트·유산소 루틴 관리 및 명시적 승인 중량 변경은 [루틴 온라인 계약](../api/routine-management.md)을 따릅니다. V11은 개인 로컬 overload_dev에 적용하지 않습니다. 운동 세션·동기화 API는 미구현입니다.
+웨이트·유산소 루틴 관리 및 명시적 승인 중량 변경은 [루틴 온라인 계약](../api/routine-management.md)을 따릅니다.
+세션 1단계 START·조회·takeover는 [세션 계약](../api/workout-sessions.md)을 따릅니다. 신규 V12는 개인 로컬 overload_dev에 적용하지 않습니다.
+snapshot·승인 충돌·finish·자동 종료·IndexedDB는 미구현입니다.
 
 본 문서는 다음 항목에 집중합니다.
 
@@ -877,9 +879,9 @@ Authorized Data Access
 
 ### 12.2 편집 권한과 24시간 보존
 
-- 사용자/세대별 ACTIVE 하나를 DB 제약으로 보장합니다. deviceId는 인증 수단이 아닙니다.
+- 세대와 무관하게 사용자별 ACTIVE 하나를 DB 제약으로 보장합니다. deviceId는 인증 수단이 아니며 별도 editorProof·기기 비밀 토큰은 도입하지 않습니다.
 - 명시적 편집 권한 인수 시 epoch를 증가시키고 revision을 0으로 초기화하며 서버 확정 상태를 반환합니다. 이전 기기의 승인은 필요 없습니다.
-- 마지막 유효 서버 갱신 후 24시간이면 AUTO_CLOSED로 마지막 서버 완료 기록을 보존합니다. 만료 시각을 실제 운동 종료 시각으로 사용하지 않습니다.
+- START와 실제 확정 운동 상태 저장 후 24시간이면 AUTO_CLOSED로 마지막 서버 완료 기록을 보존합니다. takeover·조회·중복은 기한을 연장하지 않습니다. 만료 시각을 실제 운동 종료 시각으로 사용하지 않습니다. 자동 종료 구현은 세션 후속 단계입니다.
 - START/GET/TAKEOVER/SNAPSHOT/FINISH에서도 만료를 확인합니다. 늦은 스냅샷으로 자동 종료 기록을 다시 열거나 덮어쓰지 않습니다.
 
 ### 12.3 데이터 무결성과 구현 경계

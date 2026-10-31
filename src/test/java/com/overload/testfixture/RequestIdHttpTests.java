@@ -71,6 +71,7 @@ import static org.mockito.Mockito.when;
 @Import({RequestIdHttpTests.Fixtures.class, RequestIdHttpTests.ProbeController.class,
 		SecurityFixtures.class, SecurityFixtures.FixtureController.class})
 @MockitoBean(types = {JdbcTemplate.class, PlatformTransactionManager.class, EmailOtpService.class, EmailIdentityService.class, OtpEmailSender.class,
+		com.overload.overload_server.workoutsession.WorkoutSessionService.class, com.overload.overload_server.workoutsession.WorkoutSessionRepository.class,
 		com.overload.overload_server.workout.WorkoutReadService.class,
 		com.overload.overload_server.routine.RoutineService.class, com.overload.overload_server.routine.RoutineRepository.class, com.overload.overload_server.workout.WorkoutWriteService.class})
 class RequestIdHttpTests {

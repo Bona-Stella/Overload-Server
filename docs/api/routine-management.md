@@ -117,7 +117,7 @@ API에서 먼저 범위·scale을 검증하여 DB NUMERIC의 암묵적 반올림
 루틴 삭제는 부모 deleted_at만 설정하며 자식·승인 사건은 보존한다. 활성 여부에는 부모 삭제도 포함한다.
 FK에는 기록 삭제 cascade가 없다. 승인 사건은 Hibernate Immutable 및 모든 필드 updatable=false이며 update/delete API가 없다.
 출처 UUID·최초/승인 중량은 유지한다. 미래 세션은 새 세션 종목 ID와 출처 배치 ID를 구분하고 시작 당시 전체 계획을 복사해야 한다.
-향후 START는 같은 users→routine 잠금 순서와 routine FOR SHARE, REPEATABLE_READ 쓰기 트랜잭션에서 읽기·InitialPlan·세션 생성을 원자 처리해야 한다. 경합 직렬화 실패는 전체 실패로 처리한다. 해당 API·클래스·세션 테이블은 아직 없다.
+START는 같은 users→routine 잠금 순서와 routine FOR SHARE, REPEATABLE_READ 쓰기 트랜잭션에서 읽기·InitialPlan·세션 생성을 원자 처리한다. 경합 직렬화 실패는 전체 실패로 처리한다. 구현 범위는 [세션 1단계 계약](workout-sessions.md)을 따른다. 기존 루틴 API 요청·응답은 변경하지 않는다.
 루틴 version을 공식 비교 계보에 추가하거나 이름/순서 변경으로 과거 수행을 수정하지 않는다. 일정은 미구현이며 도입 시 루틴 삭제와 일정 정리를 원자 처리한다.
 
 ## 오류
@@ -131,4 +131,4 @@ FK에는 기록 삭제 cascade가 없다. 승인 사건은 Hibernate Immutable �
 ## DB 적용 상태
 
 V11은 위 네 테이블만 추가하며 V1~V10을 수정하지 않는다. 기존 계정·종목·설정 재시드나 변환은 없다.
-검증 대상은 격리 Testcontainers PostgreSQL뿐이다. **개인 로컬 overload_dev에는 V11을 적용하지 않는다.** 앱을 실제 DB로 시작하면 대기 migration이 적용될 수 있으므로 이번 작업에서는 실행하지 않는다.
+V11 구현 당시 검증 대상은 격리 Testcontainers PostgreSQL뿐이었다. 이후 개인 로컬 V11 적용·기존 데이터 보존은 사용자 확인 사항이다. 신규 V12는 개인 로컬에 적용하지 않으며 실제 DB 대상 앱을 실행하지 않는다.

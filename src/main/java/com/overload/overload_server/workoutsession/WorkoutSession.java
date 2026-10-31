@@ -1,0 +1,58 @@
+package com.overload.overload_server.workoutsession;
+
+import jakarta.persistence.*;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
+import java.time.*;
+import java.util.UUID;
+import static com.overload.overload_server.workoutsession.WorkoutSessionFailure.Reason.*;
+
+@Entity
+@Table(name = "workout_sessions")
+public class WorkoutSession {
+    @Id UUID id;
+    @Column(name = "user_id", nullable = false, updatable = false) UUID userId;
+    @Column(name = "data_generation", nullable = false, updatable = false) long dataGeneration;
+    @Column(name = "source_routine_id", nullable = false, updatable = false) UUID sourceRoutineId;
+    @Column(nullable = false, columnDefinition = "text") String status;
+    @Column(nullable = false) long version;
+    @Column(name = "started_at", nullable = false, updatable = false) Instant startedAt;
+    @Column(name = "workout_date", nullable = false, updatable = false) LocalDate workoutDate;
+    @Column(name = "started_time_zone", nullable = false, updatable = false, columnDefinition = "text") String startedTimeZone;
+    @Column(name = "started_device_id", nullable = false, updatable = false) UUID startedDeviceId;
+    @Column(name = "editor_device_id", nullable = false) UUID editorDeviceId;
+    @Column(name = "writer_epoch", nullable = false) long writerEpoch;
+    @Column(name = "local_revision", nullable = false) long localRevision;
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "initial_plan_snapshot", nullable = false, updatable = false, columnDefinition = "jsonb") String initialPlan;
+    @Column(name = "last_workout_synced_at", nullable = false) Instant lastWorkoutSyncedAt;
+    @Column(name = "created_at", nullable = false, updatable = false) Instant createdAt;
+    @Column(name = "updated_at", nullable = false) Instant updatedAt;
+
+    protected WorkoutSession() { }
+
+    static WorkoutSession start(UUID owner, WorkoutSessionRequests.Start input, InitialPlan plan, Instant now) {
+        var value = new WorkoutSession();
+        value.id = input.id(); value.userId = owner; value.dataGeneration = input.dataGeneration();
+        value.sourceRoutineId = input.routineId(); value.status = "ACTIVE";
+        value.startedAt = input.startedAt(); value.workoutDate = input.workoutDate(); value.startedTimeZone = input.startedTimeZone();
+        value.startedDeviceId = input.editorDeviceId(); value.editorDeviceId = input.editorDeviceId();
+        value.initialPlan = plan.json(); value.lastWorkoutSyncedAt = now; value.createdAt = now; value.updatedAt = now;
+        return value;
+    }
+
+    boolean sameStart(WorkoutSessionRequests.Start input) {
+        return sourceRoutineId.equals(input.routineId()) && startedDeviceId.equals(input.editorDeviceId())
+                && startedAt.equals(input.startedAt()) && workoutDate.equals(input.workoutDate()) && startedTimeZone.equals(input.startedTimeZone());
+    }
+
+    void takeover(WorkoutSessionRequests.Takeover input, Instant now) {
+        if (!status.equals("ACTIVE")) throw new WorkoutSessionFailure(SESSION_NOT_ACTIVE);
+        // Lost response retry confirms the immediately preceding takeover without moving counters or the deadline.
+        if (input.expectedWriterEpoch() < Long.MAX_VALUE && writerEpoch == input.expectedWriterEpoch() + 1
+                && editorDeviceId.equals(input.editorDeviceId())) return;
+        if (writerEpoch != input.expectedWriterEpoch()) throw new WorkoutSessionFailure(EDITOR_OWNERSHIP_LOST);
+        if (writerEpoch == Long.MAX_VALUE || version == Long.MAX_VALUE) throw new WorkoutSessionFailure(WRITE_CONFLICT);
+        editorDeviceId = input.editorDeviceId(); writerEpoch++; localRevision = 0; version++; updatedAt = now;
+    }
+}

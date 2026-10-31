@@ -13,6 +13,7 @@ import org.springframework.session.SessionRepository;
 				+ "org.springframework.boot.flyway.autoconfigure.FlywayAutoConfiguration"
 })
 @MockitoBean(types = {JdbcTemplate.class, PlatformTransactionManager.class, SessionRepository.class,
+		com.overload.overload_server.workoutsession.WorkoutSessionService.class, com.overload.overload_server.workoutsession.WorkoutSessionRepository.class,
 		com.overload.overload_server.workout.WorkoutReadService.class,
 		com.overload.overload_server.routine.RoutineService.class, com.overload.overload_server.routine.RoutineRepository.class, com.overload.overload_server.workout.WorkoutWriteService.class})
 class OverloadServerApplicationTests {

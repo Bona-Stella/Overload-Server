@@ -13,6 +13,26 @@ public class RoutineRepository {
 	private final JdbcTemplate jdbc;
 	RoutineRepository(JdbcTemplate jdbc) { this.jdbc = jdbc; }
 
+	/** START's existing workout transaction owns these locks through InitialPlan insertion and commit. */
+	public Optional<RoutineResponses.Detail> planForWorkoutStart(UUID owner, long generation, UUID id) {
+		var source = entityManager.createQuery("select r from Routine r where r.userId=:owner and r.dataGeneration=:generation and r.id=:id and r.deletedAt is null", Routine.class)
+				.setParameter("owner", owner).setParameter("generation", generation).setParameter("id", id)
+				.setLockMode(LockModeType.PESSIMISTIC_READ).getResultStream().findFirst();
+		if (source.isEmpty()) return Optional.empty();
+		var routine = source.get();
+		var weights = weights(routine).stream().filter(p -> p.deletedAt == null).toList();
+		var cardio = cardio(routine).stream().filter(p -> p.deletedAt == null).toList();
+		var ids = new HashSet<UUID>(); weights.forEach(p -> ids.add(p.exerciseDefinitionId));
+		var definitions = exercises(owner, generation, ids, true);
+		if (weights.stream().anyMatch(p -> !definitions.containsKey(p.exerciseDefinitionId)
+				|| definitions.get(p.exerciseDefinitionId).getDeletedAt() != null)) return Optional.empty();
+		var result = weights.stream().map(p -> new RoutineResponses.Weight(p.id, p.exerciseDefinitionId,
+				definitions.get(p.exerciseDefinitionId).getName(), p.setCount, p.minReps, p.maxReps,
+				RoutineResponses.decimal(p.initialWeight), RoutineResponses.decimal(p.approvedWeight), null)).toList();
+		return Optional.of(new RoutineResponses.Detail(owner, Long.toString(generation), id, Long.toString(routine.version),
+				routine.name, result, cardio.stream().map(RoutineResponses::cardio).toList()));
+	}
+
 	long generation(UUID owner, boolean lock) {
 		var values = jdbc.query("SELECT data_generation FROM users WHERE id=?" + (lock ? " FOR SHARE" : ""),
 				(row, index) -> row.getLong(1), owner);
